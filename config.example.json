@@ -1,0 +1,63 @@
+{
+  "_comment": "Reference file. The runtime persists to ./data/zones.json and ./data/encoders.json; settings here are documentation only.",
+
+  "server_name": "Enkelvoud",
+  "fw_version": "3.9.1.2",
+
+  "ports": {
+    "discovery": 4201,
+    "audio": 4202,
+    "ctrl": 4203,
+    "clock_sync": 4204,
+    "http": 80
+  },
+
+  "audio": {
+    "opus_sample_rate": 48000,
+    "opus_frame_ms": 20,
+    "channels": 2,
+    "max_packet_bytes": 1024,
+    "audio_buffer_ms": 120,
+    "audio_buffer_min_ms": 20,
+    "audio_buffer_max_ms": 400
+  },
+
+  "modes": {
+    "off":   { "bitrate": 96000, "complexity": 4, "vbr": true,
+               "vbr_constraint": true, "signal": "music",
+               "application": "audio", "sample_rate": 48000, "buffer_ms": 120 },
+    "music": { "bitrate": 96000, "complexity": 4, "vbr": true,
+               "vbr_constraint": true, "signal": "music",
+               "application": "audio", "sample_rate": 48000, "buffer_ms": 150 },
+    "movie": { "bitrate": 96000, "complexity": 4, "vbr": true,
+               "vbr_constraint": true, "signal": "music",
+               "application": "audio", "sample_rate": 48000, "buffer_ms": 80 }
+  },
+
+  "subscriber_limits": {
+    "max_subscribers": 16,
+    "sub_dead_lastseen_ms": 7000,
+    "max_send_failures_before_skip": 10,
+    "player_stale_timeout_ms": 70000
+  },
+
+  "pacer": {
+    "max_lag_ms": 100,
+    "frame_ms": 20
+  },
+
+  "clock_sync": {
+    "min_interval_ms": 20,
+    "rate_table_size": 16,
+    "poll_interval_ms": 5,
+    "time_sync_broadcast_ms": 30000
+  },
+
+  "stubs": {
+    "ota_enabled": false,
+    "ota_error": "OTA not supported on PC server",
+    "bt_error": "source board not present on PC",
+    "dlna_enabled": false,
+    "allow_process_restart": false
+  }
+}

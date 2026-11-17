@@ -1,0 +1,17 @@
+# Core
+Flask>=3.0,<4
+zeroconf>=0.130,<1
+
+# Audio capture (Windows: WASAPI loopback)
+pyaudiowpatch>=0.2.12 ; sys_platform == "win32"
+PyAudio>=0.2.13 ; sys_platform != "win32"
+
+# Audio DSP / resampling
+numpy>=1.24,<3
+scipy>=1.10,<2
+
+# Opus encoding
+opuslib>=3.0,<4
+
+# System info (for /api/state heap/cpu numbers)
+psutil>=5.9,<7
