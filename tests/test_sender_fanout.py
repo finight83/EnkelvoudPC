@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from enkelvoud import constants as C
 from enkelvoud import sender as sender_mod
 from enkelvoud.queues import OpusPacket
-from enkelvoud.state import now_ms, runtime
+from enkelvoud.state import Zone, now_ms, runtime
 
 
 class _FakeSocket:
@@ -38,10 +38,19 @@ class _FakeSocket:
 
 
 class FanoutGateTest(unittest.TestCase):
+    NODE_IP = "192.168.100.216"
+
     def setUp(self) -> None:
         runtime.subscribers.clear()
+        # [discovered-nodes] Audio only flows to nodes assigned to a room.
+        # Put the test node in Main Room so the pre-existing gates are the
+        # thing under test here; the muted/Discovered case has its own test.
+        with runtime.zones_lock:
+            runtime.zones = [Zone(id=C.MAIN_ZONE_ID, name="Main Room",
+                                  volume=100, muted=False,
+                                  node_ips=[self.NODE_IP])]
         runtime.find_or_create_subscriber_locked(
-            "192.168.100.216", "node", C.AUDIO_PROTO_VERSION,
+            self.NODE_IP, "node", C.AUDIO_PROTO_VERSION,
             C.AUDIO_PROTO_VERSION, True,
         )
         with runtime.subs_lock:
@@ -69,7 +78,14 @@ class FanoutGateTest(unittest.TestCase):
     def test_healthy_subscriber_receives_audio(self) -> None:
         sock = self._fanout()
         self.assertEqual(len(sock.sent), 1)
-        self.assertEqual(sock.sent[0][1], ("192.168.100.216", C.AUDIO_UDP_PORT))
+        self.assertEqual(sock.sent[0][1], (self.NODE_IP, C.AUDIO_UDP_PORT))
+
+    def test_unassigned_node_is_muted(self) -> None:
+        with runtime.zones_lock:
+            runtime.zones = [Zone(id=C.MAIN_ZONE_ID, name="Main Room",
+                                  volume=100, muted=False, node_ips=[])]
+        sock = self._fanout()
+        self.assertEqual(sock.sent, [])
 
     def test_send_error_increments_counter(self) -> None:
         self._fanout(fail=True)

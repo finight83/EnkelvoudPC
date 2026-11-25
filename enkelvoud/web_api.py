@@ -73,20 +73,17 @@ def _build_state_response() -> dict:
 
     # Inject synthetic main zone if the operator deleted it somehow
     # (parity with handleApiState).
-    if players:
-        has_main = any(z.id == C.MAIN_ZONE_ID for z in zones)
-        if not has_main:
-            from .state import Zone
-            zones.insert(0, Zone(id=C.MAIN_ZONE_ID, name="Main Room",
-                                 volume=100, muted=False, node_ips=[]))
-        # Add unassigned players to main (response only, not persisted).
-        for p in players:
-            if any(p.ip in z.node_ips for z in zones):
-                continue
-            for z in zones:
-                if z.id == C.MAIN_ZONE_ID:
-                    z.node_ips.append(p.ip)
-                    break
+    if not any(z.id == C.MAIN_ZONE_ID for z in zones):
+        from .state import Zone
+        zones.insert(0, Zone(id=C.MAIN_ZONE_ID, name="Main Room",
+                             volume=100, muted=False, node_ips=[]))
+
+    # [discovered-nodes] A player is "assigned" only once it is in a zone.
+    # Unassigned players stay in the Discovered pool and get no audio until
+    # the operator drags them into a room. Do NOT auto-attach them to Main.
+    assigned = set()
+    for z in zones:
+        assigned.update(z.node_ips)
 
     # PC system load + memory (psutil if available). CPU comes from the shared
     # sampler so /api/state and /api/stats cannot steal each other's baseline.
@@ -148,6 +145,7 @@ def _build_state_response() -> dict:
             {
                 "name": p.name, "ip": p.ip, "version": p.version,
                 "lastSeenAgeMs": now - p.last_seen_ms,
+                "assigned": p.ip in assigned,
                 "declaredAudioProtocolVersion": p.declared_audio_protocol_version,
                 "negotiatedAudioProtocolVersion": p.negotiated_audio_protocol_version,
                 "audioCompatible": p.audio_compatible,

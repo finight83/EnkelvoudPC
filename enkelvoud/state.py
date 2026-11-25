@@ -422,6 +422,14 @@ class Runtime:
                          muted=z.muted, node_ips=list(z.node_ips))
                     for z in self.zones]
 
+    def assigned_node_ips(self) -> set:
+        """IPs placed in a zone. Every other node is Discovered and muted."""
+        with self.zones_lock:
+            ips = set()
+            for z in self.zones:
+                ips.update(z.node_ips)
+            return ips
+
     # ---- Node perf ops (EVDHelpers.h) --------------------------------
 
     def prune_stale_perf_locked(self, now: int) -> None:

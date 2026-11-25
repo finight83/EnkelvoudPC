@@ -13,8 +13,9 @@ Per-frame flow (mirrors EVDUDP.h udpSendTask):
        returns True  -> pack header + payload, send.
   7. Snapshot subscribers, apply per-subscriber gates, sendto each.
 
-Gates (all four must pass, in this order):
+Gates (all must pass, in this order):
   a. last_seen_ms is fresher than SUB_DEAD_LASTSEEN_MS (7000 ms)
+  a2. the node is assigned to a zone (unassigned = Discovered = muted)
   b. consecutive_send_failures < MAX_SEND_FAILURES_BEFORE_SKIP (10)
   c. has_completed_clock_sync == True
   d. audio_compatible == True
@@ -142,11 +143,18 @@ class AudioSender:
         if not subs:
             return
 
+        # [discovered-nodes] Nodes that are not in any room are muted: the
+        # server simply sends them no audio until the operator drags them
+        # into a zone on the dashboard.
+        assigned = runtime.assigned_node_ips()
         sent_ips: list[tuple[str, bool]] = []
 
         for s in subs:
             # a. Freshness gate.
             if (snapshot_ms - s.last_seen_ms) > C.SUB_DEAD_LASTSEEN_MS:
+                continue
+            # a2. Not assigned to a room yet -> muted.
+            if s.ip not in assigned:
                 continue
             # b. Send-failure gate.
             if s.consecutive_send_failures >= C.MAX_SEND_FAILURES_BEFORE_SKIP:

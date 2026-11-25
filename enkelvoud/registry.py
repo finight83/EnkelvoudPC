@@ -35,19 +35,6 @@ def resolve_zone_state_for_ip(ip: str) -> Tuple[int, bool]:
     return 100, False
 
 
-def auto_assign_to_main_zone_if_needed(ip: str) -> bool:
-    """Add ip to Main Room if it is in no zone. Returns True if added."""
-    with runtime.zones_lock:
-        for z in runtime.zones:
-            if ip in z.node_ips:
-                return False
-        for z in runtime.zones:
-            if z.id == C.MAIN_ZONE_ID:
-                z.node_ips.append(ip)
-                return True
-    return False
-
-
 # ---- Player registration orchestration -----------------------------------
 
 def handle_player_registration(
@@ -65,7 +52,8 @@ def handle_player_registration(
 
       1. Update playerNodes
       2. Update subscribers (findOrCreate -- clears failures, keeps clock-sync)
-      3. If new: auto-assign to Main Room
+      3. New nodes stay unassigned (Discovered pool) until the operator
+         drags them into a room; they are muted until then
       4. Resolve zone state
       5. If new: send host_audio_sync (first-sight form)
       6. If new: send time_sync   (first-sight form, no authoritative)
@@ -112,9 +100,10 @@ def handle_player_registration(
             if is_new:
                 runtime.subscribers[slot].last_seen_ms = now
 
-    # ---- 3. Auto-assign to Main Room (only on first sight) ---------------
-    if is_new:
-        auto_assign_to_main_zone_if_needed(ip)
+    # ---- 3. Do NOT auto-assign: new nodes land in the Discovered pool ----
+    # The operator drags a node into a room on the dashboard; until then
+    # AudioSender._fanout sends it no audio (muted). This makes "first join"
+    # explicit instead of every new node immediately playing in Main Room.
 
     # ---- 4. Resolve current zone state -----------------------------------
     zvol, zmute = resolve_zone_state_for_ip(ip)
