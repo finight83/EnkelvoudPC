@@ -247,6 +247,13 @@ class Runtime:
         # discovery.probe_other_servers). Non-empty means nodes are split
         # between servers; surfaced in /api/stats and the Status tab.
         self.competing_servers: List[dict] = []
+        # [servers-decide] True when this server is the elected leader -- the
+        # only one that answers node discovery and accepts registrations.
+        # Single-server installs stay True; the peer election in peers.py
+        # flips it when another server outranks this one.
+        self.is_leader: bool = True
+        # Alive peer servers from the beacon table (dashboard "Servers").
+        self.peer_servers: List[dict] = []
 
         self.playback_mode_idx: int = C.MODE_OFF
 

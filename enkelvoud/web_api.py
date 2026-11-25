@@ -18,6 +18,7 @@ from . import constants as C
 from . import ctrl
 from . import discovery
 from . import encoding_ctl
+from . import peers as peers_mod
 from . import registry
 from . import sysinfo
 from . import zone_ctl
@@ -125,10 +126,17 @@ def _build_state_response() -> dict:
             "muted": z.muted, "nodes": node_entries,
         })
 
+    # [servers-decide] Election state for the dashboard's Servers card.
+    peers_snap = peers_mod.peers.snapshot()
+
     return {
         "ok": True,
         "ip": discovery.get_local_ip(),
         "serverName": runtime.server_name,
+        "role": peers_snap["role"],
+        "priority": peers_mod.peers.priority,
+        "leaderId": peers_snap["leaderId"],
+        "servers": peers_snap["servers"],
         "quietMode": runtime.quiet_mode,
         "cpuPct": cpu["proc"],
         "sysCpuPct": cpu["sys"],
@@ -370,6 +378,18 @@ def create_app(web_dir: str, allow_restart: bool = False,
         if empty is not None:
             return empty
 
+        # [servers-decide] Only the elected leader serves nodes. A standby
+        # answers 503 so the node's contact fails and it re-discovers the
+        # leader (which owns mDNS + the discovery reply).
+        if not runtime.is_leader:
+            leader = peers_mod.peers.leader_descriptor()
+            return _json({
+                "ok": False,
+                "status": "standby",
+                "leaderId": leader.get("id", ""),
+                "leaderIp": leader.get("ip", ""),
+            }, 503)
+
         ip = request.remote_addr or "0.0.0.0"
         p_name = "Player Node"
         p_ver = ""
@@ -442,6 +462,38 @@ def create_app(web_dir: str, allow_restart: bool = False,
             except (TypeError, ValueError):
                 pass
         return _json({"ok": True})
+
+    # ---- /api/servers (P3: servers decide) -----------------------------
+    @app.route("/api/servers", methods=["GET"])
+    def api_servers():
+        return _json(peers_mod.peers.snapshot())
+
+    @app.route("/api/servers/priority", methods=["POST"])
+    def api_servers_priority():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict) or not isinstance(data.get("priority"), int):
+            return _json({"ok": False, "error": "priority int required"}, 400)
+        value = peers_mod.peers.set_priority(int(data["priority"]))
+        return _json({"ok": True, "priority": value,
+                      "role": peers_mod.peers.role})
+
+    @app.route("/api/servers/order", methods=["POST"])
+    def api_servers_order():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict) or not isinstance(data.get("order"), list):
+            return _json({"ok": False, "error": "order list required"}, 400)
+        order = [x for x in data["order"] if isinstance(x, str)]
+        results = peers_mod.peers.apply_order(order)
+        snap = peers_mod.peers.snapshot()
+        return _json({"ok": True, "results": results,
+                      "servers": snap["servers"], "role": snap["role"],
+                      "leaderId": snap["leaderId"]})
 
     # ---- /api/config ---------------------------------------------------
     @app.route("/api/config", methods=["POST"])

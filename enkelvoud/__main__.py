@@ -26,9 +26,11 @@ import time
 from . import capture as capture_mod
 from . import clock_sync as clock_sync_mod
 from . import constants as C
+from . import ctrl as ctrl_mod
 from . import discovery as discovery_mod
 from . import encoder as encoder_mod
 from . import encoding_ctl
+from . import peers as peers_mod
 from . import registry
 from . import sender as sender_mod
 from . import zone_ctl
@@ -62,28 +64,77 @@ def _stats_meter(stop: threading.Event) -> None:
 
 
 def _check_competing_servers() -> None:
-    """Warn if another Enkelvoud server is answering discovery on this LAN.
+    """Report the other Enkelvoud servers on this LAN.
 
-    Player nodes attach to whichever server they find first, so running the PC
-    server alongside a still-powered ESP32-S3 makes each server see a subset of
-    the nodes. This turns that into one clear WARN at startup.
+    [servers-decide] With the peer protocol the others are expected: the
+    election decides which one the nodes attach to. Only a server that answers
+    discovery without a peer beacon (old firmware) still splits the fleet, so
+    the legacy probe runs only when no peer beacons were heard.
     """
-    time.sleep(1.0)          # let the responder / mDNS settle first
+    time.sleep(2.0)          # let the first peer beacons arrive
     try:
-        others = discovery_mod.probe_other_servers()
+        snap = peers_mod.peers.snapshot()
+        others = [s for s in snap.get("servers", []) if not s.get("self")]
+    except Exception as e:
+        log_warn("Peer servers: snapshot failed: %s", e)
+        others = []
+        snap = {}
+    runtime.competing_servers = others
+    if others:
+        log_info("Peer servers: %d on this LAN; leader is %s (this server: %s)",
+                 len(others), snap.get("leaderId"), snap.get("role"))
+        for o in others:
+            log_info("Peer: %s at %s, priority %s, %s",
+                     o.get("name", o.get("id")), o.get("ip"),
+                     o.get("priority"), "alive" if o.get("alive") else "down")
+        return
+
+    # Legacy fallback: a server that predates the peer beacon still answers
+    # DISCOVER, and that one really does split the fleet.
+    try:
+        legacy = discovery_mod.probe_other_servers()
     except Exception as e:
         log_warn("Discovery: competing-server probe failed: %s", e)
         return
-    runtime.competing_servers = others
-    for o in others:
+    runtime.competing_servers = legacy
+    for o in legacy:
         # Keep this short: the log ring truncates lines at 127 chars.
         parts = o["reply"].split()
         ver = (" (v" + parts[3] + ")") if len(parts) >= 4 else ""
-        log_warn("Discovery: second Enkelvoud server at %s%s - power it off, "
-                 "nodes split between servers.", o["ip"], ver)
-    if others:
-        log_warn("Discovery: found %d competing server(s) on this LAN.",
-                 len(others))
+        log_warn("Discovery: second Enkelvoud server at %s%s has no peer "
+                 "beacon - update it so the election can take over.",
+                 o["ip"], ver)
+    if legacy:
+        log_warn("Discovery: found %d legacy server(s) on this LAN.",
+                 len(legacy))
+
+
+def _notify_standby() -> None:
+    """Tell our subscribers to re-discover the new leader.
+
+    Old node firmware ignores the unknown ctrl type and falls back to its
+    existing stale-contact re-discovery (~60 s); new node firmware can drop the
+    contact immediately.
+    """
+    try:
+        subs = runtime.snapshot_subscribers(now_ms())
+        for s in subs:
+            ctrl_mod.send_ctrl_to_subscriber(s.ip, '{"type":"server_standby"}')
+        if subs:
+            log_info("Peer role: told %d node(s) to re-discover", len(subs))
+    except Exception as e:
+        log_warn("Peer role: standby notice failed: %s", e)
+
+
+def _on_peer_role(role: str) -> None:
+    """Peer election handed this server a new role (servers decide)."""
+    is_leader = (role == "leader")
+    try:
+        discovery_mod.discovery.set_leader(is_leader)
+    except Exception as e:
+        log_warn("Peer role: discovery switch failed: %s", e)
+    if not is_leader:
+        _notify_standby()
 
 
 def _parse_args(argv):
@@ -146,6 +197,19 @@ def main(argv=None) -> int:
                  "firmware). Nodes cannot register while the server is not on "
                  "port 80.", args.port)
 
+    # [servers-decide] Peer beacons + election. The leader answers nodes; a
+    # standby steps discovery and audio down until the leader disappears.
+    try:
+        peers_mod.peers.configure(
+            os.path.join(args.data_dir, "peers.json"),
+            args.port, on_role_change=_on_peer_role,
+        )
+        peers_mod.peers.start()
+    except Exception as e:
+        log_warn("Peer election failed to start: %s", e)
+    log_info("  servers: role %s, priority %d",
+             peers_mod.peers.role, peers_mod.peers.priority)
+
     # A second Enkelvoud server on this LAN (e.g. an ESP32-S3 left powered)
     # splits the node fleet between the two. Warn clearly instead of letting it
     # look like "only some nodes connect".
@@ -185,6 +249,10 @@ def main(argv=None) -> int:
     def _shutdown(_signum=None, _frame=None):
         log_info("Shutting down")
         stop_event.set()
+        try:
+            peers_mod.peers.stop()
+        except Exception:
+            pass
         try:
             discovery_mod.discovery.stop()
         except Exception:

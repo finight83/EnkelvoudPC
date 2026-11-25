@@ -139,6 +139,10 @@ class AudioSender:
     # ---- Fanout -------------------------------------------------------------
 
     def _fanout(self, datagram: bytes, snapshot_ms: int, pkt) -> None:
+        # [servers-decide] A standby must not stream: its nodes belong to the
+        # elected leader, and it accepts no registrations while standing by.
+        if not runtime.is_leader:
+            return
         subs = runtime.snapshot_subscribers(snapshot_ms)
         if not subs:
             return

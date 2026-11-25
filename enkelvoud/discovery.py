@@ -67,6 +67,9 @@ class DiscoveryResponder:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._http_port = 80
+        # [servers-decide] Only the elected leader answers node discovery and
+        # owns the mDNS name. See peers.py.
+        self._is_leader = True
 
     def start(self, http_port: int = 80) -> None:
         self._http_port = http_port
@@ -81,7 +84,25 @@ class DiscoveryResponder:
         self._thread.start()
 
         log_info("UDP discovery responder listening on port %d", C.DISCOVERY_PORT)
-        self._setup_mdns()
+        if self._is_leader:
+            self._setup_mdns()
+
+    def set_leader(self, is_leader: bool) -> None:
+        """Switch between leader (answers nodes) and standby (silent).
+
+        The leader owns mDNS 'Enkelvoud.local' and the UDP discovery reply; a
+        standby owns neither, so nodes converge on the leader. Called by the
+        peer election whenever the role changes.
+        """
+        if is_leader == self._is_leader:
+            return
+        self._is_leader = is_leader
+        if is_leader:
+            log_info("Discovery: LEADER - answering nodes, advertising mDNS")
+            self._setup_mdns()
+        else:
+            log_info("Discovery: STANDBY - not answering nodes")
+            self._teardown_mdns()
 
     def stop(self) -> None:
         self._stop.set()
@@ -108,6 +129,11 @@ class DiscoveryResponder:
             # Trim trailing whitespace, then compare.
             trimmed = data.rstrip(b"\r\n \t")
             if trimmed != request_bytes:
+                continue
+
+            # [servers-decide] Standby servers stay silent: only the elected
+            # leader answers node discovery, so every node lands on it.
+            if not self._is_leader:
                 continue
 
             local_ip = get_local_ip()
@@ -186,7 +212,8 @@ class DiscoveryResponder:
         """Called by /api/config when serverName changes."""
         runtime.server_name = new_name
         self._teardown_mdns()
-        self._setup_mdns()
+        if self._is_leader:
+            self._setup_mdns()
 
 
 # ---- Competing-server detection -------------------------------------------

@@ -21,7 +21,8 @@ Anything marked INFERRED is a PC-side design choice, not taken from your files.
 # The PC server reports a plain "version": there is no microcontroller
 # firmware here. The string is still sent in the UDP discovery reply, where
 # the ESP32 player nodes expect the same field layout as the ESP32 server.
-VERSION = "3.9.1.2"
+# 3.9.2.0: P3 - multi-server peer beacons + "servers decide" election.
+VERSION = "3.9.2.0"
 
 # ---- Audio wire protocol ---------------------------------------------------
 # EnkelvoudServer.ino
@@ -69,6 +70,18 @@ DISCOVERY_PORT      = 4201
 AUDIO_UDP_PORT      = 4202
 CTRL_UDP_PORT       = 4203
 CLOCK_SYNC_UDP_PORT = 4204
+
+# ---- Multi-server peer beacons (P3: servers decide) ------------------------
+# Every Enkelvoud server broadcasts a JSON beacon on PEER_PORT once a second
+# and elects the alive server with the lowest (priority, id) as the leader.
+# Only the leader answers node discovery / accepts registrations.
+PEER_PORT               = 4205
+PEER_PROTOCOL           = "enkelvoud-peer/1"
+PEER_BEACON_INTERVAL_MS = 1000
+PEER_DEAD_MS            = 5000    # alive while a beacon is younger than this
+PEER_PRUNE_MS           = 60000   # drop dead peers from the dashboard table
+DEFAULT_SERVER_PRIORITY = 1       # 1 = highest; this server is preferred
+MAX_SERVER_PRIORITY     = 99
 
 # ---- Discovery strings -----------------------------------------------------
 DISCOVERY_MAGIC_REQ = "ENKELVOUDP/1 DISCOVER"
