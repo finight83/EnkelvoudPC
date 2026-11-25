@@ -1,0 +1,25 @@
+# Core
+Flask>=3.0,<4
+zeroconf>=0.130,<1
+
+# Audio capture (Windows: WASAPI loopback)
+pyaudiowpatch>=0.2.12 ; sys_platform == "win32"
+PyAudio>=0.2.13 ; sys_platform != "win32"
+
+# Audio DSP / resampling
+numpy>=1.24,<3
+scipy>=1.10,<2
+
+# Opus encoding. The wheel carries the native library itself (opus.dll on
+# Windows, libopus.so/.dylib elsewhere), so nothing has to be installed on the
+# system and no download URL has to be trusted. `opuslib` alone is only a
+# ctypes binding and fails with "Could not find Opus library" on a machine
+# without libopus, so it is the fallback, not the default.
+opuslib-next-bundled>=0.1.1,<0.2
+
+# System info (for /api/state heap/cpu numbers)
+psutil>=5.9,<7
+
+# tests/mock_node.py only. Kept here so `pip install -r requirements.txt`
+# is enough to run the end-to-end test harness.
+requests>=2.31,<3
