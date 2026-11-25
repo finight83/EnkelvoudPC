@@ -61,6 +61,31 @@ def _stats_meter(stop: threading.Event) -> None:
         prev_bytes = cur_bytes
 
 
+def _check_competing_servers() -> None:
+    """Warn if another Enkelvoud server is answering discovery on this LAN.
+
+    Player nodes attach to whichever server they find first, so running the PC
+    server alongside a still-powered ESP32-S3 makes each server see a subset of
+    the nodes. This turns that into one clear WARN at startup.
+    """
+    time.sleep(1.0)          # let the responder / mDNS settle first
+    try:
+        others = discovery_mod.probe_other_servers()
+    except Exception as e:
+        log_warn("Discovery: competing-server probe failed: %s", e)
+        return
+    runtime.competing_servers = others
+    for o in others:
+        # Keep this short: the log ring truncates lines at 127 chars.
+        parts = o["reply"].split()
+        ver = (" (v" + parts[3] + ")") if len(parts) >= 4 else ""
+        log_warn("Discovery: second Enkelvoud server at %s%s - power it off, "
+                 "nodes split between servers.", o["ip"], ver)
+    if others:
+        log_warn("Discovery: found %d competing server(s) on this LAN.",
+                 len(others))
+
+
 def _parse_args(argv):
     p = argparse.ArgumentParser(prog="enkelvoud")
     p.add_argument("--host", default="0.0.0.0")
@@ -94,7 +119,7 @@ def main(argv=None) -> int:
     encoding_ctl.apply_mode_settings_to_live(runtime.playback_mode_idx)
 
     log_info("Enkelvoud PC server starting")
-    log_info("  FW_VERSION: %s", C.FW_VERSION)
+    log_info("  version: %s", C.VERSION)
     log_info("  serverEpoch: %d", runtime.server_epoch)
     log_info("  serverName: %s", runtime.server_name)
     log_info("  mode: %s", runtime.playback_mode_cstr())
@@ -110,10 +135,23 @@ def main(argv=None) -> int:
     meter_thread.start()
 
     try:
-        discovery_mod.discovery.start()
+        discovery_mod.discovery.start(args.port)
     except OSError as e:
         log_error("Discovery failed to start: %s", e)
         return 1
+
+    if args.port != 80:
+        log_warn("HTTP is on port %d, but player nodes always POST to "
+                 "http://<server-ip>/ (port 80 is hard-coded in the node "
+                 "firmware). Nodes cannot register while the server is not on "
+                 "port 80.", args.port)
+
+    # A second Enkelvoud server on this LAN (e.g. an ESP32-S3 left powered)
+    # splits the node fleet between the two. Warn clearly instead of letting it
+    # look like "only some nodes connect".
+    threading.Thread(
+        target=_check_competing_servers, name="discovery-probe", daemon=True,
+    ).start()
 
     try:
         clock_sync_mod.clock_sync.start()

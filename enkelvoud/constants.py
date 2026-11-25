@@ -17,9 +17,11 @@ Verified against:
 Anything marked INFERRED is a PC-side design choice, not taken from your files.
 """
 
-# ---- Firmware identity -----------------------------------------------------
-# EnkelvoudServer.ino: EVD_FW_VERSION "3.9.1.2", FW_VERSION = EVD_FW_VERSION
-FW_VERSION = "3.9.1.2"
+# ---- Server identity -------------------------------------------------------
+# The PC server reports a plain "version": there is no microcontroller
+# firmware here. The string is still sent in the UDP discovery reply, where
+# the ESP32 player nodes expect the same field layout as the ESP32 server.
+VERSION = "3.9.1.2"
 
 # ---- Audio wire protocol ---------------------------------------------------
 # EnkelvoudServer.ino
@@ -106,9 +108,6 @@ MAIN_ZONE_ID = "main"
 EVD_LOG_RING_LEN = 32
 EVD_LOG_LINE_MAX = 128
 
-# ---- Source-board log ring (stub on PC) ------------------------------------
-SOURCE_LOG_RING_LEN = 50
-
 # ---- Node perf table -------------------------------------------------------
 NODE_PERF_STALE_TIMEOUT_MS = 20000
 NODE_PERF_MAX_ENTRIES      = 32
@@ -116,7 +115,6 @@ NODE_PERF_MAX_ENTRIES      = 32
 # ---- Defaults --------------------------------------------------------------
 DEFAULT_SERVER_NAME   = "Enkelvoud"
 DEFAULT_MASTER_VOLUME = 100
-DEFAULT_POT_VOLUME    = 100
 DEFAULT_MASTER_MUTED  = False
 
 # ---- Per-mode encoder presets ---------------------------------------------
@@ -143,11 +141,6 @@ MODE_ENCODE_DEFAULTS = [
 # ---- mDNS services ---------------------------------------------------------
 # EVDWiFi.h MDNS.addService calls
 MDNS_SERVICES = [("_http", "_tcp", 80), ("_enkelsrv", "_tcp", 80)]
-
-# ---- OTA behavior ----------------------------------------------------------
-# INFERRED: user-confirmed "Option A" (503 stub for every /api/ota/* route)
-OTA_STUB_ENABLED = True
-OTA_STUB_ERROR   = "OTA not supported on PC server"
 
 # ---- Discovery reply target -----------------------------------------------
 # INFERRED: reply is sent to the request's source port (per EVDWiFi.h)

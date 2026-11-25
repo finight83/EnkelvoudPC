@@ -3,8 +3,8 @@
 A Windows-first PC replacement for the ESP32-S3 "Enkelvoud" audio server.
 
 The package is `enkelvoud/`; run it with `python -m enkelvoud` from this
-directory (or via `run.bat`). `extract_dashboard.py`, `tests/` and
-`requirements.txt` sit beside it, not inside it.
+directory (or via `run.bat`). `tests/` and `requirements.txt` sit beside it,
+not inside it.
 
 Double-click `run.bat` on a PC with no Python at all: the first run installs a
 private Python into `runtime\python` (see "No Python to install" below).
@@ -18,10 +18,9 @@ same HTTP API, and serves the same dashboard on port 80.
 - **Discovery** — answers `ENKELVOUDP/1 DISCOVER` on UDP :4201 with
   `ENKELVOUDP/1 SERVER <name> 3.9.1.2 <ip>`, and advertises itself via
   mDNS (`_http._tcp` and `_enkelsrv._tcp` on port 80).
-- **Node management** — implements `/api/player/register`,
-  `/api/node_stats`, `/api/player/ota_result`, zone CRUD, and pushes
-  `host_audio_sync` + `time_sync` over UDP :4203. Per-node volume, mute,
-  and zone state are mirrored from the ESP32 behaviour.
+- **Node management** — implements `/api/player/register`, `/api/node_stats`,
+  zone CRUD, and pushes `host_audio_sync` + `time_sync` over UDP :4203.
+  Per-node volume, mute, and zone state are mirrored from the ESP32 behaviour.
 - **Clock sync** — the exact `sync_req` / `sync_resp` JSON exchange on
   UDP :4204, with the 20 ms per-IP rate limit, the 5 ms poll, and the
   30 s authoritative `time_sync` broadcast. Nodes are only marked
@@ -31,21 +30,22 @@ same HTTP API, and serves the same dashboard on port 80.
   Opus 20 ms frames, and sends the 12-byte-header datagrams to each
   subscribed node at one frame per 20 ms with a stale-frame dropper that
   matches `EVDPacer.h` verbatim.
-- **Dashboard** — serves the same un-gzipped dashboard HTML as the ESP32.
+- **Dashboard** — a PC-native web UI (Zones, Advanced, Update) served from
+  `web/dashboard.html`. Master volume is controlled by Windows; the PC itself
+  is the audio source (always captures all PC audio).
 
-## What it doesn't do (PC stubs)
+## What it doesn't do
 
-- **OTA** — every `/api/ota/*` route returns
-  `503 {"ok":false,"error":"OTA not supported on PC server"}` except
-  `/api/ota/plan` and `/api/ota/status`, which return the correct shapes
-  with `lastError` set to the same string.
-- **BT / AUX / USB source board** — `/api/bt/*` return empty, `/api/cmd`
-  returns `503 source board not present on PC`, `/api/source` accepts the
-  request but does not switch capture device.
+- **Source switching** — there is no BT/AUX/USB selector; the PC captures all
+  of its own audio (WASAPI loopback) and is itself the source.
+- **Network configuration** — the PC is assumed to be on an already-configured
+  network; there is no Wi-Fi setup UI or route.
+- **Over-the-air updates** — the PC app is updated by replacing its files;
+  player firmware is updated from each node's own settings page. There are no
+  `/api/ota/*` routes.
+- **Master volume/mute** — controlled by Windows, not the server.
 - **DLNA/UPnP** — `/api/dlna` reflects a `--dlna on|off` flag but no
   SSDP/renderer is implemented.
-- **Wi-Fi settings** — `/api/network/state`, `/save`, `/api/wifi/scan/*`
-  return the correct shapes but do not modify network configuration.
 - **Server restart** — `/api/restart` returns `{"ok":true}`; pass
   `--allow-restart` to make it actually exit the process.
 
@@ -147,8 +147,7 @@ Double-click `run.bat`, or from a terminal:
     run.bat --name MyHome --dlna on
 
 It keeps the console open on exit and prints why it stopped, so a window
-that closes is never silent. It extracts `web\dashboard.html` from
-`EVDCTRL.h` if it is missing, and it runs on the bundled Python described
+that closes is never silent. It runs on the bundled Python described
 above, so there is nothing to install first -- no Python, no `libopus`, no
 DLL (see "Opus setup").
 
@@ -168,7 +167,6 @@ via `/api/discover`).
     py -3 -m venv .venv
     .venv\Scripts\activate              # POSIX: . .venv/bin/activate
     python -m pip install -r requirements.txt
-    python extract_dashboard.py EVDCTRL.h web\dashboard.html
 
 `run.bat` prefers `runtime\python` over `.venv`, so delete `runtime\` (or set
 `ENKELVOUD_NO_BOOTSTRAP=1`) if you want a hand-made `.venv` to be used.
@@ -227,22 +225,8 @@ matches the ESP32: `[INFO ] <ms> ms | <text>`.
 
 ## Known limitations
 
-See `docs/INFERRED.md` and `docs/STUBBED.md`. In short:
-
-- `serverEpoch` seed is inferred (Unix-ms & 0xFFFFFFFF, forced ≥ 1). The
-  C++ uses `esp_timer_get_time()/1000`. The only constraint from the files
-  is "reboot-unique seed for zone IDs" and "monotonic epoch echoed to
-  nodes". Both hold.
 - `capture.py` resamples to 48 kHz using `scipy.signal.resample_poly`.
-  The ESP32's `ResamplerToOpusRate` (Catmull-Rom with a rate-1 fast path)
-  is not reproduced bit-exactly. Bit-exact capture resampling is not
-  required for node compatibility, only the wire format is.
-- The dashboard is not embedded; it is served from `web/dashboard.html`.
-  Regenerate after editing `EVDCTRL.h` with `tools/extract_dashboard.py`.
-
-## Verification status
-
-`docs/VERIFIED.md` lists every behaviour with its source file and line
-class. `docs/INFERRED.md` lists every place I had to choose something the
-files do not pin down. `docs/STUBBED.md` lists every route that returns
-a non-functional but shape-correct response.
+  Bit-exact capture resampling is not required for node compatibility, only
+  the wire format is.
+- The dashboard is served from `web/dashboard.html` (no embedded copy or
+  `EVDCTRL.h` header).

@@ -1,0 +1,12 @@
+# Private Python that install.bat / run.bat builds (~250 MB, rebuildable).
+runtime/
+
+# A hand-made virtualenv, if you use the manual route in README.md.
+.venv/
+
+# `web/dashboard.html` is the dashboard source (served directly), so it IS
+# tracked. Only per-run state and bytecode are ignored.
+data/
+
+__pycache__/
+*.pyc

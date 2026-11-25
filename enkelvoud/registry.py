@@ -12,6 +12,7 @@ from typing import Tuple
 
 from . import constants as C
 from . import ctrl
+from .log_ring import log_info
 from .state import (
     runtime,
     now_ms,
@@ -120,6 +121,8 @@ def handle_player_registration(
 
     # ---- 5 & 6. First-sight pushes ---------------------------------------
     if is_new:
+        log_info("Player joined: %s (%s) v%s%s", name, ip, version or "?",
+                 "" if compatible else " - audio incompatible: " + reason)
         ctrl.send_host_audio_sync_first_sight(ip, decision, zvol, zmute)
         ctrl.send_time_sync_first_sight(ip)
     # else: no per-heartbeat UDP push; the HTTP response carries the state.

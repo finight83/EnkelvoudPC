@@ -1,24 +1,10 @@
 """
 enkelvoud.web_api - Flask application for every /api/* route.
 
-Route table verified against EVDRoutes.h. Every JSON response shape is
-copied verbatim from the corresponding C++ handler.
-
-PC stubs:
-  - /api/ota/* (except plan/status) -> 503 {"ok":false,"error":"OTA not supported on PC server"}
-  - /api/source                       -> 200 {"ok":true,"source":"<s>","transport":"pc"}
-  - /api/cmd                          -> 503 {"ok":false,"error":"source board not present on PC"}
-  - /api/bt/devices                   -> {"devices":[]}
-  - /api/bt/kick, /api/bt/remove      -> 200 {"ok":true} (no-op)
-  - /api/source/info                  -> full shape with empty data
-  - /api/network/state, /api/network-test, /api/wifi/scan -> PC-shaped stubs
-  - /save                             -> NOT a stub: validates the same form
-                                         fields as handleSaveNetworkSettings,
-                                         applies serverName + mDNS rename, and
-                                         ignores the Wi-Fi fields (the OS owns
-                                         the network).
-  - /api/restart                      -> {"ok":true}, no restart unless --allow-restart
-  - /api/dlna                         -> reflects --dlna flag
+The PC server is the source and runs on an already-configured machine, so the
+ESP32-only surfaces are gone: there is no network config tab, no source-board
+(BT/AUX/USB) switching, no OTA wizard, and no master volume/mute (Windows owns
+volume). Player-node registration, zones, encoding and diagnostics remain.
 """
 
 import ipaddress
@@ -33,8 +19,9 @@ from . import ctrl
 from . import discovery
 from . import encoding_ctl
 from . import registry
+from . import sysinfo
 from . import zone_ctl
-from .log_ring import log_ring, log_info, log_warn, log_error
+from .log_ring import log_ring, log_info
 from .state import (
     runtime, now_ms, sanitize_server_name, evaluate_audio_compatibility,
     _clamp_encode_settings, EncodeSettings,
@@ -80,7 +67,8 @@ def _app_str(app: int) -> str:
 # ---- /api/state ---------------------------------------------------------
 
 def _build_state_response() -> dict:
-    players = runtime.snapshot_players(now_ms())
+    now = now_ms()
+    players = runtime.snapshot_players(now)
     zones = runtime.snapshot_zones()
 
     # Inject synthetic main zone if the operator deleted it somehow
@@ -100,10 +88,9 @@ def _build_state_response() -> dict:
                     z.node_ips.append(p.ip)
                     break
 
-    # [sourceNominalRate] I2S/USB paths = 48k nominal.
-    source_nominal_rate = C.SOURCE_SAMPLE_RATE
-
-    # [pc-heap-stats] Honest values from psutil if available, else zeros.
+    # PC system load + memory (psutil if available). CPU comes from the shared
+    # sampler so /api/state and /api/stats cannot steal each other's baseline.
+    cpu = sysinfo.read()
     try:
         import psutil
         vm = psutil.virtual_memory()
@@ -145,32 +132,22 @@ def _build_state_response() -> dict:
         "ok": True,
         "ip": discovery.get_local_ip(),
         "serverName": runtime.server_name,
-        "masterMuted": runtime.master_muted,
         "quietMode": runtime.quiet_mode,
-        "cpuCore0Pct": -1,
-        "cpuCore1Pct": -1,
+        "cpuPct": cpu["proc"],
+        "sysCpuPct": cpu["sys"],
         "heapUsedPct": heap_used_pct,
         "heapFreeBytes": heap_free_bytes,
         "heapTotalBytes": heap_total_bytes,
         "heapMaxAlloc": heap_max_alloc,
-        "psramUsedPct": 0,
-        "psramFreeBytes": 0,
-        "psramTotalBytes": 0,
-        "masterVolume": runtime.master_volume,
-        "potVolume": runtime.pot_volume,
-        "latencyAdjustmentMs": runtime.latency_adjustment_ms,
         "audioBufferMs": runtime.audio_buffer_ms,
-        "postResampleRate": C.SOURCE_SAMPLE_RATE,
-        "sourceSampleRate": C.SOURCE_SAMPLE_RATE,
-        "sourceNominalRate": source_nominal_rate,
         "opusSampleRate": runtime.opus_sample_rate,
         "mode": runtime.playback_mode_cstr(),
         "audioProtocolVersion": C.AUDIO_PROTO_VERSION,
         "serverEpoch": runtime.server_epoch & 0xFFFFFFFF,
-        "receiverAudio": {"source": runtime.receiver_source},
         "players": [
             {
                 "name": p.name, "ip": p.ip, "version": p.version,
+                "lastSeenAgeMs": now - p.last_seen_ms,
                 "declaredAudioProtocolVersion": p.declared_audio_protocol_version,
                 "negotiatedAudioProtocolVersion": p.negotiated_audio_protocol_version,
                 "audioCompatible": p.audio_compatible,
@@ -203,36 +180,31 @@ def _build_stats_response() -> dict:
     # OPUS_FRAME_MS = 20 -> samples/sec / 50
     opus_frame_samples = runtime.opus_sample_rate // (1000 // C.OPUS_FRAME_MS)
 
+    # Shared sampler — see sysinfo.py for why this is not a per-request call.
+    cpu = sysinfo.read()
+
+    try:
+        from . import capture as capture_mod
+        cinfo = capture_mod.capture.info()
+    except Exception:
+        cinfo = {"backend": "unknown", "rate": 0, "channels": 0, "ok": False}
+
     return {
         "ok": True,
         "ip": discovery.get_local_ip(),
-        "wifiConnected": True,
-        "wifiRssi": 0,
-        "wifiSsid": "",
-        "wifiDisconnects": 0,
+        "cpuPct": cpu["proc"],
+        "sysCpuPct": cpu["sys"],
+        "captureBackend": cinfo["backend"],
+        "captureRate": cinfo["rate"],
+        "captureChannels": cinfo["channels"],
+        "captureOk": cinfo.get("ok", False),
+        "competingServers": runtime.competing_servers,
         "wsClients": runtime.subscriber_count,   # no WebSocket on PC; subscribers is the honest proxy
         "mode": runtime.playback_mode_cstr(),
         "audioBufferMs": runtime.audio_buffer_ms,
-        "postResampleRate": C.SOURCE_SAMPLE_RATE,
-        "sourceSampleRate": C.SOURCE_SAMPLE_RATE,
-        "sourceNominalRate": C.SOURCE_SAMPLE_RATE,
         "opusSampleRate": runtime.opus_sample_rate,
         "opusFrameSamples": opus_frame_samples,
-        "latencyAdjustmentMs": runtime.latency_adjustment_ms,
-        "masterVolume": runtime.master_volume,
-        "potVolume": runtime.pot_volume,
-        "masterMuted": runtime.master_muted,
-        "i2sReadErrors": 0,
         "udpErrors": runtime.stat_udp_errors,
-        "avgEncodeUs": 0,
-        "encodeOverrunsLastSec": 0,
-        "encodeOverrunsTotal": 0,
-        "encodePeakUsLastSec": 0,
-        "pendingBufDroppedLastSec": 0,
-        "pendingBufDroppedTotal": 0,
-        "pendingBufPeakDepthLastSec": 0,
-        "measuredInputHz": float(C.SOURCE_SAMPLE_RATE),
-        "clockDriftPpm": 0,
         "audioProtocolVersion": C.AUDIO_PROTO_VERSION,
         "serverEpoch": runtime.server_epoch & 0xFFFFFFFF,
         "clockSyncPort": C.CLOCK_SYNC_UDP_PORT,
@@ -242,11 +214,7 @@ def _build_stats_response() -> dict:
         "audioIncompatibleSkips": runtime.stat_audio_incompatible_skips,
         "audioProvisionalSkips": runtime.stat_audio_provisional_skips,
         "audioSyncPending": runtime.stat_audio_sync_pending,
-        "usbBytesLastWin": 0,
-        "serverInputSource": "USB",
         "streaming": {
-            "i2sBytesLast5s": 0,
-            "rawDroppedLast5s": 0,
             "opusDroppedLast5s": runtime.stat_opus_dropped_last_5s,
         },
         "rawQueueDepth": raw_qd,
@@ -267,18 +235,6 @@ def _build_stats_response() -> dict:
             for p in perf
         ],
         "rebuffers": total_rebuffers,
-        "sourceBoard": {
-            "fw": "", "link": False, "btConnected": False,
-            "mac": "", "volume": 0, "avrc": False,
-            "activeSource": "", "loopTicks": 0,
-            "heapFree": 0, "uptimeSec": 0,
-            "a2dpConnecting": 0, "a2dpConnected": 0,
-            "a2dpDisconnecting": 0, "a2dpDisconnected": 0,
-            "volumeEvents": 0, "volumeApplied": 0,
-            "uartBytes": 0, "uartLines": 0,
-            "uartOverflow": 0, "uartTxDropped": 0,
-            "sourceChanges": 0, "heartbeatAgeMs": 0,
-        },
         "udpSendLoopCount": runtime.udp_send_loop_count,
         "udpSendStallResets": runtime.udp_send_stall_resets,
         "udpPacerAheadReset": runtime.udp_pacer_ahead_reset,
@@ -286,8 +242,6 @@ def _build_stats_response() -> dict:
         "udpPacerDriftReset": runtime.udp_pacer_drift_reset,
         "udpStageAfterRecv": runtime.udp_stage_after_recv,
         "udpStageAfterStore": runtime.udp_stage_after_store,
-        "otaLastProgressAgeMs": 0xFFFFFFFF,
-        "receiverAudio": {"state": runtime.receiver_state},
     }
 
 
@@ -315,9 +269,7 @@ def create_app(web_dir: str, allow_restart: bool = False,
             "<body style='font-family: sans-serif; max-width: 720px; margin: 2em auto;'>"
             "<h1>Enkelvoud PC server</h1>"
             "<p>The dashboard HTML is not present.</p>"
-            "<p>Place the un-gzipped contents of <code>EVDCTRL.h</code> "
-            "(everything between <code>R\"HTML(</code> and <code>)HTML\"</code>) "
-            "at <code>web/dashboard.html</code> and reload.</p>"
+            "<p>Place the dashboard at <code>web/dashboard.html</code> and reload.</p>"
             "<p>Endpoints that already work: "
             "<code>/api/state</code>, <code>/api/stats</code>, "
             "<code>/api/fw</code>, <code>/api/log/tail</code>, "
@@ -331,7 +283,7 @@ def create_app(web_dir: str, allow_restart: bool = False,
     # ---- /api/fw -------------------------------------------------------
     @app.route("/api/fw", methods=["GET"])
     def api_fw():
-        return _json({"version": C.FW_VERSION})
+        return _json({"version": C.VERSION})
 
     # ---- /api/state ----------------------------------------------------
     @app.route("/api/state", methods=["GET"])
@@ -493,21 +445,6 @@ def create_app(web_dir: str, allow_restart: bool = False,
                 pass
         return _json({"ok": True})
 
-    # ---- /api/player/ota_result ---------------------------------------
-    @app.route("/api/player/ota_result", methods=["POST"])
-    def api_player_ota_result():
-        empty = _reject_empty_body()
-        if empty is not None:
-            return empty
-        data = _try_parse_json()
-        if isinstance(data, dict):
-            ip = request.remote_addr or "0.0.0.0"
-            who = data.get("name", ip)
-            success = bool(data.get("success", False))
-            log_info("OTA result (stub): %s (%s) success=%s",
-                     who, ip, success)
-        return _json({"ok": True})
-
     # ---- /api/config ---------------------------------------------------
     @app.route("/api/config", methods=["POST"])
     def api_config():
@@ -525,15 +462,6 @@ def create_app(web_dir: str, allow_restart: bool = False,
             return _json({"ok": False, "error": "Empty request body"}, 400)
 
         # ---- Phase 1: validate ----------------------------------------
-        mute_explicit = ("masterMuted" in data
-                         and isinstance(data["masterMuted"], bool))
-
-        if "masterVolume" in data and isinstance(data["masterVolume"], int):
-            v = int(data["masterVolume"])
-            if v < 0 or v > 100:
-                return _json({"ok": False,
-                              "error": "Volume must be between 0 and 100"}, 400)
-
         if "audioBufferMs" in data and isinstance(data["audioBufferMs"], int):
             v = int(data["audioBufferMs"])
             if v < C.AUDIO_BUFFER_MIN_MS or v > C.AUDIO_BUFFER_MAX_MS:
@@ -555,18 +483,8 @@ def create_app(web_dir: str, allow_restart: bool = False,
                 return _json({"ok": False,
                               "error": "Server name must use 1-32 letters or numbers"}, 400)
 
-        if "defaultSource" in data and isinstance(data["defaultSource"], str):
-            v = data["defaultSource"].upper()
-            if v not in ("BT", "AUX", "USB"):
-                return _json({"ok": False,
-                              "error": "defaultSource must be BT, AUX or USB"}, 400)
-
         # ---- Phase 2: apply -------------------------------------------
         changed = False
-
-        if mute_explicit:
-            runtime.master_muted = bool(data["masterMuted"])
-            changed = True
 
         if "mode" in data and isinstance(data["mode"], str):
             m = data["mode"].lower()
@@ -578,12 +496,6 @@ def create_app(web_dir: str, allow_restart: bool = False,
 
         if "quietMode" in data and isinstance(data["quietMode"], bool):
             runtime.quiet_mode = bool(data["quietMode"])
-            changed = True
-
-        if "masterVolume" in data and isinstance(data["masterVolume"], int):
-            runtime.master_volume = max(0, min(100, int(data["masterVolume"])))
-            if not mute_explicit:
-                runtime.master_muted = False
             changed = True
 
         if "audioBufferMs" in data and isinstance(data["audioBufferMs"], int):
@@ -603,11 +515,6 @@ def create_app(web_dir: str, allow_restart: bool = False,
                     discovery.discovery.restart_mdns(new_name)
                 except Exception:
                     pass
-            changed = True
-
-        if "defaultSource" in data and isinstance(data["defaultSource"], str):
-            v = data["defaultSource"].upper()
-            runtime.boot_source_idx = {"BT": 0, "AUX": 1, "USB": 2}[v]
             changed = True
 
         if not changed:
@@ -646,84 +553,6 @@ def create_app(web_dir: str, allow_restart: bool = False,
         body = encoding_ctl.apply_defaults()
         zone_ctl.broadcast_node_config()
         return _json(body)
-
-    # ---- /api/source ---------------------------------------------------
-    @app.route("/api/source", methods=["POST"])
-    def api_source():
-        empty = _reject_empty_body()
-        if empty is not None:
-            return empty
-        data = _try_parse_json()
-        src = ""
-        if isinstance(data, dict) and isinstance(data.get("source"), str):
-            src = data["source"].strip().upper()
-        if not src or len(src) > 8 or src not in ("BT", "AUX", "USB"):
-            return _json({"ok": False, "error": "invalid source"}, 400)
-        runtime.receiver_source = src
-        log_info("Source request (PC stub): %s", src)
-        # [api-source-transport] Firmware answers "local-usb" for USB and
-        # "bridge" for BT/AUX (EVDPlayers.h handleApiSourceBridge). On the
-        # PC nothing is bridged and no USB host device is started, so the
-        # honest value is "none" rather than an invented "pc". No client
-        # reads the field today; it is kept for shape parity.
-        return _json({"ok": True, "source": src, "transport": "none"})
-
-    # [api-cmd-shape] Firmware handleApiSourceBridge/handleApiCmd answer
-    # {"ok":false,"error":"source board not present"} with 503; the body
-    # is JSON-safe on both sides, so a client that checks ok/error
-    # behaves the same. The PC has no UART, so this is a hard 503.
-    # ---- /api/cmd ------------------------------------------------------
-    @app.route("/api/cmd", methods=["POST"])
-    def api_cmd():
-        empty = _reject_empty_body()
-        if empty is not None:
-            return empty
-        log_info("Cmd request (PC stub): source board not present")
-        return _json({"ok": False,
-                      "error": "source board not present on PC"}, 503)
-
-    # ---- /api/source/info ---------------------------------------------
-    @app.route("/api/source/info", methods=["GET"])
-    def api_source_info():
-        return _json({
-            "ok": True,
-            "link": False,
-            "btConnected": False,
-            "connectedMac": "",
-            "volume": 0,
-            "activeSource": runtime.receiver_source,
-            "a2dpConnecting": 0,
-            "a2dpConnected": 0,
-            "a2dpDisconnected": 0,
-            "avrcConnected": False,
-            "volumeEvents": 0,
-            "uartLines": 0,
-            "heartbeatAgeMs": 0,
-            "activeMac": "",
-            "devices": [],
-            "log": [],
-        })
-
-    # ---- /api/bt/* -----------------------------------------------------
-    @app.route("/api/bt/devices", methods=["GET"])
-    def api_bt_devices():
-        return _json({"devices": []})
-
-    @app.route("/api/bt/kick", methods=["POST"])
-    def api_bt_kick():
-        log_info("BT kick requested (PC stub)")
-        return _json({"ok": True})
-
-    @app.route("/api/bt/remove", methods=["POST"])
-    def api_bt_remove():
-        empty = _reject_empty_body()
-        if empty is not None:
-            return empty
-        data = _try_parse_json()
-        if isinstance(data, dict) and isinstance(data.get("mac"), str):
-            log_info("BT remove requested (PC stub): %s", data["mac"])
-            return _json({"ok": True})
-        return _json({"ok": False}, 400)
 
     # ---- Zones ---------------------------------------------------------
     @app.route("/api/zones/create", methods=["POST"])
@@ -813,70 +642,6 @@ def create_app(web_dir: str, allow_restart: bool = False,
         log_info("Node forgotten (test hook): %s", ip)
         return _json({"ok": True, "forgot": ip})
 
-    # ---- Network (PC stubs) -------------------------------------------
-    @app.route("/api/network/state", methods=["GET"])
-    def api_network_state():
-        return _json({
-            "ok": True,
-            "serverName": runtime.server_name,
-            "ssid": "",
-            "passwordSet": False,
-            "useStatic": False,
-            "ip": "",
-            "gateway": "",
-            "subnet": "255.255.255.0",
-            "dns": "",
-            "activeIp": discovery.get_local_ip(),
-            "apMode": False,
-        })
-
-    @app.route("/api/network-test", methods=["GET"])
-    def api_network_test():
-        # See [save-network-noop-success]: nothing to test, always settled.
-        return _json({"state": "success",
-                      "ip": discovery.get_local_ip()})
-
-    @app.route("/save", methods=["POST"])
-    def api_save():
-        # Form-encoded. Accept and log, no actual network change.
-        server_name = request.form.get("server_name", "").strip()
-        ssid = request.form.get("ssid", "").strip()
-        if not server_name or len(server_name) > 32:
-            return _json({"ok": False,
-                          "error": "Server name must be 1-32 letters or digits"}, 400)
-        if not all(c.isalnum() for c in server_name):
-            return _json({"ok": False,
-                          "error": "Server name must contain only letters and digits"}, 400)
-        if not ssid:
-            return _json({"ok": False,
-                          "error": "Wi-Fi SSID is required"}, 400)
-        log_info("Network save request (PC stub): ssid='%s'", ssid)
-        if server_name != runtime.server_name:
-            runtime.server_name = server_name
-            try:
-                discovery.discovery.restart_mdns(server_name)
-            except Exception:
-                pass
-        # [save-network-noop-success] The dashboard's Network tab polls
-        # /api/network-test after this POST and gives up unless it sees
-        # state == "success" (EVDCTRL.h saveNetwork). There is no Wi-Fi
-        # association to test on a PC: the OS owns the network and the
-        # server is already reachable on it, which is the thing the test
-        # proves on the ESP32. So report success with the address the
-        # server is actually reachable at, and the tab finishes normally
-        # instead of sitting on "Unable to connect" forever.
-        return _json({"ok": True, "state": "success",
-                      "ip": discovery.get_local_ip()})
-
-    @app.route("/api/wifi/scan/start", methods=["GET"])
-    def api_wifi_scan_start():
-        log_info("WiFi scan requested (PC stub)")
-        return _json({"ok": True, "state": "started"})
-
-    @app.route("/api/wifi/scan/status", methods=["GET"])
-    def api_wifi_scan_status():
-        return _json({"state": "done", "networks": []})
-
     @app.route("/api/restart", methods=["POST"])
     def api_restart():
         log_info("Restart requested (PC stub, allow_restart=%s)",
@@ -886,69 +651,6 @@ def create_app(web_dir: str, allow_restart: bool = False,
             import threading
             threading.Timer(0.3, lambda: os._exit(0)).start()
         return _json({"ok": True})
-
-    @app.route("/settings", methods=["GET"])
-    def api_settings_page():
-        html = (
-            "<!doctype html><html><head><title>Settings</title></head>"
-            "<body style='font-family: sans-serif; max-width: 720px; "
-            "margin: 2em auto;'><h1>Network settings</h1>"
-            "<p>Network configuration is managed by the operating system "
-            "on the PC server. Use the dashboard's Network tab for the "
-            "same information.</p></body></html>"
-        )
-        return Response(html, status=200, mimetype="text/html; charset=utf-8")
-
-    # ---- OTA ----------------------------------------------------------
-    @app.route("/api/ota/plan", methods=["GET"])
-    def api_ota_plan():
-        players = runtime.snapshot_players(now_ms())
-        return _json({
-            "ok": True,
-            "serverVersion": C.FW_VERSION,
-            "inProgress": False,
-            "progressPct": 0,
-            "lastTarget": "",
-            "lastError": C.OTA_STUB_ERROR,
-            "totalBytes": 0,
-            "usedBytes": 0,
-            "allSpoolFiles": [],
-            "files": [],
-            "nodes": [
-                {"ip": p.ip, "name": p.name, "version": p.version,
-                 "reachable": True}
-                for p in players
-            ],
-        })
-
-    @app.route("/api/ota/status", methods=["GET"])
-    def api_ota_status():
-        return _json({
-            "ok": True,
-            "inProgress": False,
-            "stalled": False,
-            "stalledAgeMs": 0,
-            "progressPct": 0,
-            "target": "",
-            "error": "",
-            "completed": [],
-            "failed": [],
-        })
-
-    @app.route("/api/ota/apply", methods=["POST"])
-    def api_ota_apply():
-        log_warn("OTA apply requested (PC stub)")
-        return _json({"ok": False, "error": C.OTA_STUB_ERROR}, 503)
-
-    @app.route("/api/ota/upload", methods=["POST"])
-    def api_ota_upload():
-        log_warn("OTA upload requested (PC stub)")
-        return _json({"ok": False, "error": C.OTA_STUB_ERROR}, 503)
-
-    @app.route("/api/ota/delete", methods=["POST"])
-    def api_ota_delete():
-        log_warn("OTA delete requested (PC stub)")
-        return _json({"ok": False, "error": C.OTA_STUB_ERROR}, 503)
 
     # ---- 404 catch-all -------------------------------------------------
     @app.errorhandler(404)

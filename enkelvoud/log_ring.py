@@ -52,10 +52,21 @@ class LogRing:
             e["text"] = text
             self._write_idx = (self._write_idx + 1) % C.EVD_LOG_RING_LEN
 
-        # Serial-equivalent stdout output.
+        # Serial-equivalent stdout output. A Windows console is usually a
+        # single-byte code page (cp1252/cp850), so a non-ASCII character in a
+        # message would make sys.stdout.write() raise UnicodeEncodeError and
+        # the try/except below would silently drop the line from the console
+        # (it would still reach /api/log/tail). Encode with "replace" so the
+        # operator always sees the line, and keep the exact text in the ring.
         prefix = _LEVEL_STDOUT.get(level, "INFO ")
+        out_text = text
         try:
-            sys.stdout.write(f"[{prefix}] {ms:8d} ms | {text}\n")
+            enc = sys.stdout.encoding or "utf-8"
+            out_text = text.encode(enc, "replace").decode(enc, "replace")
+        except Exception:
+            pass
+        try:
+            sys.stdout.write(f"[{prefix}] {ms:8d} ms | {out_text}\n")
             sys.stdout.flush()
         except Exception:
             pass

@@ -3,7 +3,7 @@ enkelvoud.discovery - UDP :4201 responder + mDNS advertisement.
 
 Wire formats:
   request  (node -> server):  b"ENKELVOUDP/1 DISCOVER"  (whitespace-trimmed)
-  response (server -> node):  b"ENKELVOUDP/1 SERVER <serverName> <FW_VERSION> <localIp>"
+  response (server -> node):  b"ENKELVOUDP/1 SERVER <serverName> <VERSION> <localIp>"
 
 Response is sent to the REQUEST'S SOURCE IP AND PORT (not to 4201).
 mDNS services registered: _http._tcp and _enkelsrv._tcp, both on port 80.
@@ -66,8 +66,10 @@ class DiscoveryResponder:
         self._sock: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._http_port = 80
 
-    def start(self) -> None:
+    def start(self, http_port: int = 80) -> None:
+        self._http_port = http_port
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # No SO_REUSEADDR: two instances on one PC should fail loudly.
         self._sock.bind(("0.0.0.0", C.DISCOVERY_PORT))
@@ -112,7 +114,7 @@ class DiscoveryResponder:
             reply = (
                 f"{C.DISCOVERY_MAGIC_RPY} "
                 f"{runtime.server_name} "
-                f"{C.FW_VERSION} "
+                f"{C.VERSION} "
                 f"{local_ip}"
             )
             try:
@@ -145,14 +147,14 @@ class DiscoveryResponder:
             self._zc = Zeroconf()
             self._service_infos = []
 
-            for svc_type, proto, port in C.MDNS_SERVICES:
+            for svc_type, proto, _default_port in C.MDNS_SERVICES:
                 full_type = f"{svc_type}.{proto}.local."
                 instance = f"{name}.{full_type}"
                 info = ServiceInfo(
                     type_=full_type,
                     name=instance,
                     addresses=[ip_bytes],
-                    port=port,
+                    port=self._http_port,
                     properties={},
                     server=f"{name}.local.",
                     host_ttl=120,
@@ -185,6 +187,75 @@ class DiscoveryResponder:
         runtime.server_name = new_name
         self._teardown_mdns()
         self._setup_mdns()
+
+
+# ---- Competing-server detection -------------------------------------------
+# Player nodes look for "Enkelvoud.local" (mDNS) and fall back to a UDP
+# DISCOVER broadcast, then attach to whichever server answers. So TWO servers
+# on one LAN (e.g. the PC and an ESP32-S3 that is still powered) split the
+# fleet: the loser looks half-populated even though it is running, and every
+# node drifts back to the survivor once the other one stops. This check makes
+# that situation obvious at startup instead of as a mystery "3 of 5 nodes".
+
+def _broadcast_ip() -> Optional[str]:
+    """Directed broadcast address of the interface carrying the LAN IP."""
+    target = get_local_ip()
+    try:
+        import ipaddress
+        import psutil
+        for addrs in psutil.net_if_addrs().values():
+            for a in addrs:
+                if a.family == socket.AF_INET and a.address == target and a.netmask:
+                    net = ipaddress.IPv4Network(f"{target}/{a.netmask}",
+                                                strict=False)
+                    return str(net.broadcast_address)
+    except Exception:
+        pass
+    return None
+
+
+def probe_other_servers(timeout_ms: int = 1200) -> list:
+    """Return any *other* Enkelvoud servers answering UDP DISCOVER on this LAN.
+
+    Each entry is {"ip": str, "reply": str}. The local responder's own reply is
+    filtered out by source IP. Sends only the discovery request; it cannot
+    disturb nodes (they never listen on :4201) or the other server.
+    """
+    self_ip = get_local_ip()
+    req = C.DISCOVERY_MAGIC_REQ.encode("ascii")
+    targets = []
+    directed = _broadcast_ip()
+    if directed:
+        targets.append(directed)
+    targets.append("255.255.255.255")
+
+    found: dict = {}
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(0.2)
+        for t in targets:
+            try:
+                sock.sendto(req, (t, C.DISCOVERY_PORT))
+            except OSError:
+                pass
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
+        while time.monotonic() < deadline:
+            try:
+                data, addr = sock.recvfrom(2048)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            ip = addr[0]
+            if ip == self_ip:
+                continue
+            body = data.decode("utf-8", "replace").strip()
+            if body.startswith(C.DISCOVERY_MAGIC_RPY):
+                found[ip] = body
+    finally:
+        sock.close()
+    return [{"ip": ip, "reply": body} for ip, body in found.items()]
 
 
 # Singleton

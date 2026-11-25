@@ -60,6 +60,13 @@ _FRAME_SAMPLES = 960
 _FRAME_BYTES = _FRAME_SAMPLES * 2 * 2   # int16 * 2 channels
 _CHUNK_FRAMES = 1024                     # WASAPI read granularity
 
+# A WASAPI loopback stream dies whenever Windows switches or removes the
+# default output device (PortAudio reports "Stream closed"). Re-open the
+# *current* default device instead of giving up, and throttle the log so a
+# vanished device cannot flood the console/ring while we retry.
+_RECONNECT_LOG_MS = 5000
+_RECONNECT_MAX_S = 5.0
+
 
 def _resample_ratio(in_rate: int, out_rate: int) -> tuple[int, int]:
     g = gcd(in_rate, out_rate)
@@ -95,39 +102,115 @@ class AudioCapture:
 
     def stop(self) -> None:
         self._stop.set()
-        if self._stream is not None:
+        self._close_stream()
+
+    def _close_stream(self) -> None:
+        """Tear down the PortAudio stream + PyAudio instance (idempotent)."""
+        stream, pa = self._stream, self._pa
+        self._stream = None
+        self._pa = None
+        if stream is not None:
             try:
-                self._stream.stop_stream()
-                self._stream.close()
+                stream.stop_stream()
             except Exception:
                 pass
-        if self._pa is not None:
             try:
-                self._pa.terminate()
+                stream.close()
             except Exception:
                 pass
+        if pa is not None:
+            try:
+                pa.terminate()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _backoff_s(streak: int) -> float:
+        return min(0.5 * streak, _RECONNECT_MAX_S)
+
+    def info(self) -> dict:
+        """Snapshot of the capture device, for /api/stats diagnostics."""
+        return {
+            "backend": _BACKEND,
+            "rate": self._device_rate or _SRC_RATE,
+            "channels": self._device_channels or C.CHANNELS,
+            "ok": self._stream is not None and not self._stop.is_set(),
+        }
 
     # ---- Thread -------------------------------------------------------------
 
     def _run(self) -> None:
-        try:
-            self._open()
-        except Exception as e:
-            log_error("Capture: failed to open device: %s", e)
-            return
+        # Never give up: (re)open the capture device for as long as the
+        # process lives. A dead loopback stream is recovered by re-opening the
+        # current default device, not by exiting the thread.
+        fail_streak = 0
+        failing = False
+        last_log_ms = -_RECONNECT_LOG_MS
+
+        def _log_throttled(logfn, fmt: str, *args) -> None:
+            # At most one reconnect-related line per _RECONNECT_LOG_MS. This is
+            # what keeps a vanished device from flooding the ring/console.
+            nonlocal last_log_ms
+            now = now_ms()
+            if now - last_log_ms < _RECONNECT_LOG_MS:
+                return
+            last_log_ms = now
+            logfn(fmt, *args)
 
         while not self._stop.is_set():
+            if self._stream is None:
+                try:
+                    self._open()
+                except Exception as e:
+                    fail_streak += 1
+                    failing = True
+                    _log_throttled(log_warn,
+                                   "Capture: device unavailable (%s); "
+                                   "retrying (attempt %d)", e, fail_streak)
+                    if self._stop.wait(self._backoff_s(fail_streak)):
+                        break
+                    continue
+                fail_streak = 0
+
             try:
                 raw = self._stream.read(
                     _CHUNK_FRAMES, exception_on_overflow=False,
                 )
             except Exception as e:
-                log_warn("Capture: read error: %s", e)
+                # Device vanished / stream invalidated. Drop the stream and go
+                # round again so the next pass re-opens the current default
+                # device. The first failure is always logged; later ones are
+                # throttled (see _log_throttled), so this is never a busy loop.
+                fail_streak += 1
+                if not failing:
+                    failing = True
+                    last_log_ms = now_ms()
+                    log_warn("Capture: read error: %s (reconnecting)", e)
+                else:
+                    _log_throttled(log_warn,
+                                   "Capture: still no audio after %d read "
+                                   "error(s) (%s)", fail_streak, e)
+                self._close_stream()
+                if self._stop.wait(self._backoff_s(fail_streak)):
+                    break
                 continue
 
-            self._ingest(raw)
+            if failing:
+                failing = False
+                log_info("Capture: audio capture recovered")
+            fail_streak = 0
+
+            try:
+                self._ingest(raw)
+            except Exception as e:
+                _log_throttled(log_warn, "Capture: ingest error: %s", e)
 
     def _open(self) -> None:
+        self._close_stream()
+        # A partial frame buffered from the previous device must not be
+        # spliced onto the new device's samples.
+        self._frame_buf = np.zeros((0, 2), dtype=np.int16)
+
         self._pa = pyaudio.PyAudio()
 
         dev_index = None
@@ -150,22 +233,25 @@ class AudioCapture:
                          info["name"], self._device_rate,
                          self._device_channels)
         except Exception as e:
-            self._pa.terminate()
-            self._pa = None
+            self._close_stream()
             raise RuntimeError(f"no usable input device ({e})") from e
 
         self._up, self._down = _resample_ratio(self._device_rate, _SRC_RATE)
         log_info("Capture: resample %d -> %d Hz (up=%d down=%d)",
                  self._device_rate, _SRC_RATE, self._up, self._down)
 
-        self._stream = self._pa.open(
-            format=pyaudio.paInt16,
-            channels=self._device_channels,
-            rate=self._device_rate,
-            frames_per_buffer=_CHUNK_FRAMES,
-            input=True,
-            input_device_index=dev_index,
-        )
+        try:
+            self._stream = self._pa.open(
+                format=pyaudio.paInt16,
+                channels=self._device_channels,
+                rate=self._device_rate,
+                frames_per_buffer=_CHUNK_FRAMES,
+                input=True,
+                input_device_index=dev_index,
+            )
+        except Exception:
+            self._close_stream()
+            raise
 
     def _ingest(self, raw: bytes) -> None:
         arr = np.frombuffer(raw, dtype=np.int16)

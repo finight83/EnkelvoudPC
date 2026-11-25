@@ -95,10 +95,20 @@ class NodePerf:
 
 @dataclass
 class SubscriberSnap:
-    """EVDHelpers.h struct SubscriberSnap."""
+    """EVDHelpers.h struct SubscriberSnap, plus the send-path failure count.
+
+    The C++ struct does not carry `consecutiveSendFailures`: udpSendTask()
+    copies it into its own local `SubEntry` (EVDUDP.h) while holding
+    subsMutex, and gates on `snapBuf[si].failures`. The Python sender has a
+    single fan-out loop over this snapshot, so the counter travels with the
+    snapshot instead of in a second struct. The audio gate in
+    AudioSender._fanout() reads it, and the reset/increment path re-reads
+    the live table under subs_lock.
+    """
     ip: str
     name: str
     last_seen_ms: int
+    consecutive_send_failures: int
     declared_audio_protocol_version: int
     negotiated_audio_protocol_version: int
     audio_compatible: bool
@@ -227,22 +237,18 @@ class Runtime:
         # ---- Server / audio settings ----------------------------------
         self.server_name: str = C.DEFAULT_SERVER_NAME
         self.master_volume: int = C.DEFAULT_MASTER_VOLUME
-        self.pot_volume: int = C.DEFAULT_POT_VOLUME
         self.master_muted: bool = C.DEFAULT_MASTER_MUTED
         self.quiet_mode: bool = False
         self.latency_adjustment_ms: int = 0
         self.audio_buffer_ms: int = C.MODE_ENCODE_DEFAULTS[C.MODE_OFF]["buffer_ms"]
         self.log_level: int = 3              # NEW: /api/log/level
         self.dlna_enabled: bool = False      # NEW: /api/dlna flag (stub)
+        # Other Enkelvoud servers answering discovery on this LAN (see
+        # discovery.probe_other_servers). Non-empty means nodes are split
+        # between servers; surfaced in /api/stats and the Status tab.
+        self.competing_servers: List[dict] = []
 
         self.playback_mode_idx: int = C.MODE_OFF
-        # [boot-source-parity] 0=BT, 1=AUX, 2=USB. The firmware's boot
-        # default is BT (EnkelvoudServer/EVDState.h BOOT_SOURCE). The PC has
-        # no source board at all, so this only has to be a faithful mirror;
-        # it is BT to match, not USB.
-        self.boot_source_idx: int = 0
-        self.receiver_source: str = "USB"
-        self.receiver_state: str = "idle"
 
         # ---- Encoder per-mode presets (RAM copy) ----------------------
         self.mode_settings: List[EncodeSettings] = [
@@ -312,36 +318,22 @@ class Runtime:
         self.stat_udp_packets_last_5s: int = 0
         self.stat_udp_bytes_last_5s: int = 0
 
-        # ---- Source-board stubs (empty on PC) -------------------------
-        self.source_fw_version: str = ""
-        self.source_connected_mac: str = ""
-        self.source_bt_volume: int = 0
-        self.source_last_heartbeat_ms: int = 0
-        self.source_bt_json: str = "{\"devices\":[]}"
-        self.source_log_ring: List[str] = []
-        self.source_log_ring_head: int = 0
-        self.source_log_ring_count: int = 0
-
-        # ---- OTA gate (always False on PC) ----------------------------
-        self.ota_in_progress: bool = False
-        self.ota_upload_in_progress: bool = False
-        self.ota_pause_audio: bool = False
-        self.ota_last_progress_ms: int = 0
-
     # ---- Accessors for parity with C++ helpers ---------------------
 
     def playback_mode_cstr(self) -> str:
         return C.MODE_NAMES[self.playback_mode_idx if 0 <= self.playback_mode_idx < 3 else 0]
 
-    def boot_source_cstr(self) -> str:
-        return ["BT", "AUX", "USB"][self.boot_source_idx if 0 <= self.boot_source_idx < 3 else 0]
-
     # ---- Subscriber table ops (EVDHelpers.h translations) ------------
 
     def prune_stale_subscribers_locked(self, now: int) -> None:
         """Caller must hold subs_lock."""
-        kept = [s for s in self.subscribers
-                if (now - s.last_seen_ms) <= C.PLAYER_STALE_TIMEOUT_MS]
+        kept = []
+        for s in self.subscribers:
+            if (now - s.last_seen_ms) <= C.PLAYER_STALE_TIMEOUT_MS:
+                kept.append(s)
+            else:
+                self.log("W", "Subscriber expired: %s (%s) - no data for %d s"
+                         % (s.name, s.ip, (now - s.last_seen_ms) // 1000))
         self.subscribers = kept
         self.subscriber_count = len(kept)
 
@@ -394,6 +386,7 @@ class Runtime:
             return [
                 SubscriberSnap(
                     ip=s.ip, name=s.name, last_seen_ms=s.last_seen_ms,
+                    consecutive_send_failures=s.consecutive_send_failures,
                     declared_audio_protocol_version=s.declared_audio_protocol_version,
                     negotiated_audio_protocol_version=s.negotiated_audio_protocol_version,
                     audio_compatible=s.audio_compatible,
@@ -406,10 +399,14 @@ class Runtime:
     # ---- Player table ops --------------------------------------------
 
     def prune_stale_players_locked(self, now: int) -> None:
-        self.player_nodes = [
-            p for p in self.player_nodes
-            if (now - p.last_seen_ms) <= C.PLAYER_STALE_TIMEOUT_MS
-        ]
+        kept = []
+        for p in self.player_nodes:
+            if (now - p.last_seen_ms) <= C.PLAYER_STALE_TIMEOUT_MS:
+                kept.append(p)
+            else:
+                self.log("W", "Player expired: %s (%s) - no heartbeat for %d s"
+                         % (p.name, p.ip, (now - p.last_seen_ms) // 1000))
+        self.player_nodes = kept
 
     def snapshot_players(self, now: int) -> List[PlayerNode]:
         with self.players_lock:
