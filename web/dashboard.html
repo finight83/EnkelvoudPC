@@ -295,6 +295,209 @@
       border-color: var(--danger);
       box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);
     }
+    /* ==================================================================
+       CLEAN THEME - soft glass panel, hairline rows, quiet glows.
+       Overrides the original candy-glass look; layout rules are untouched.
+       ================================================================== */
+    :root {
+      --text-main: #f4f5fb;
+      --text-muted: #b3b9d1;
+      --accent-primary: #9db6ff;
+      --accent-secondary: #b48cff;
+      --glass-bg: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+      --glass-border-light: rgba(255,255,255,0.14);
+      --glass-border-dim: rgba(255,255,255,0.10);
+      --panel: rgba(18,18,34,0.55);
+      --card: rgba(255,255,255,0.055);
+      --hair: rgba(255,255,255,0.10);
+      --hair-strong: rgba(255,255,255,0.16);
+      --danger: #ff6b81;
+      --success: #4ade80;
+      --warn: #fbbf24;
+    }
+
+    body { background: #07070f; padding: 28px 20px; }
+
+    /* Calmer backdrop: two slow, blurred glows instead of orbs + stars */
+    .stars { display: none !important; }
+    .orb { filter: blur(120px); opacity: .42; animation-duration: 40s; }
+    .orb-1 { background: #4b2bff; width: 460px; height: 460px; top: -160px; left: -120px; }
+    .orb-2 { background: #8a4bff; width: 520px; height: 520px; bottom: -200px; right: -140px; }
+    .orb-3 { background: #1f8fff; width: 380px; height: 380px; opacity: .30; }
+
+    .dashboard-container {
+      max-width: 920px;
+      border-radius: 30px;
+      border: 1px solid var(--hair-strong);
+      background: var(--glass-bg);
+      backdrop-filter: blur(28px) saturate(140%);
+      -webkit-backdrop-filter: blur(28px) saturate(140%);
+      box-shadow: 0 40px 90px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.16);
+    }
+
+    /* Header + pill navigation ------------------------------------------------ */
+    .top-bar { padding: 22px 26px 14px; gap: 16px; align-items: center; }
+    .page-title {
+      font-size: 1.35rem; font-weight: 650; letter-spacing: -0.02em;
+      background: none; -webkit-text-fill-color: currentColor; color: #fff;
+      text-shadow: none;
+    }
+    .page-title svg { opacity: .35; }
+    .node-sub { color: var(--text-muted) !important; letter-spacing: .01em; }
+
+    .menu-bar {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 2px;
+      padding: 5px;
+      border: 1px solid var(--hair);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+    }
+    .menu-bar .nav-btn {
+      border: none; background: transparent; border-radius: 999px;
+      padding: 8px 15px; font-size: .86rem; font-weight: 550;
+      color: var(--text-muted); gap: 7px;
+      transition: background .18s ease, color .18s ease;
+    }
+    .menu-bar .nav-btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+    .menu-bar .nav-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .menu-bar .nav-btn.active { background: rgba(255,255,255,0.15); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.22); }
+    .menu-bar .nav-btn-primary { background: rgba(255,255,255,0.07); color: var(--text-muted); box-shadow: none; border: none; }
+    .menu-bar .nav-btn-primary:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+    /* Surfaces --------------------------------------------------------------- */
+    .control-card, .zone-box, .enc-card, .rec-panel, .ota-modal-panel {
+      background: var(--card);
+      border: 1px solid var(--hair);
+      border-radius: 20px;
+      box-shadow: none;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    .zone-box { padding: 18px; border-radius: 22px; }
+    .zone-container { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .zone-actions { justify-content: flex-start; gap: 8px; }
+    /* the room name is a heading, not a form field */
+    .zone-header input[type="text"] { background: transparent; border: none; padding: 2px 0; font-weight: 600; font-size: 1rem; }
+    .data-label .stat-pill { text-transform: none; letter-spacing: 0; }
+    .menu-bar .nav-btn svg { stroke-linecap: round; stroke-linejoin: round; }
+    .control-card { padding: 16px 18px; }
+    .tab-content { padding: 6px 26px 26px; }
+
+    .section-title {
+      font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em;
+      background: none; -webkit-background-clip: border-box;
+      -webkit-text-fill-color: currentColor; color: #fff; text-shadow: none;
+    }
+    .sticky-shell {
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+      border-bottom: 1px solid var(--hair);
+    }
+    .data-label {
+      font-size: .74rem; text-transform: uppercase; letter-spacing: .12em;
+      color: var(--text-muted); font-weight: 600;
+    }
+    .muted { color: var(--text-muted); }
+
+    /* Rows ------------------------------------------------------------------- */
+    .enc-field { border-bottom: 1px solid var(--hair); padding: 12px 0; }
+    .enc-field:last-child { border-bottom: none; }
+    .enc-target-row { gap: 14px; }
+    .node-chip {
+      background: rgba(255,255,255,0.05); border: 1px solid var(--hair);
+      border-radius: 14px; padding: 11px 13px;
+    }
+    .node-chip:hover { background: rgba(255,255,255,0.09); transform: none; }
+    .zone-header input {
+      background: transparent; border: none; font-size: 1rem; font-weight: 600;
+      color: var(--text-main); padding: 4px 0;
+    }
+    .zone-header { border-bottom: 1px solid var(--hair); padding-bottom: 10px; }
+    .zone-row { color: var(--text-muted); }
+
+    /* Controls --------------------------------------------------------------- */
+    .btn-glass, .btn {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid var(--hair);
+      border-radius: 999px;
+      color: var(--text-main);
+      padding: 8px 16px; font-size: .85rem; font-weight: 550;
+      transition: background .18s ease, border-color .18s ease;
+    }
+    .btn-glass:hover, .btn:hover { background: rgba(255,255,255,0.12); border-color: var(--hair-strong); }
+    .btn-primary {
+      background: linear-gradient(135deg, #9db6ff, #b48cff);
+      border: none; border-radius: 999px; color: #0b0a16;
+      font-weight: 650; padding: 9px 18px;
+      box-shadow: 0 6px 20px rgba(150,140,255,.28);
+    }
+    .btn-primary:hover { filter: brightness(1.06); }
+    .btn-primary:disabled, .btn:disabled, .btn-glass:disabled { opacity: .45; cursor: default; }
+
+    select, input[type="text"], input[type="number"], input[type="file"] {
+      background: rgba(0,0,0,0.25);
+      border: 1px solid var(--hair);
+      border-radius: 12px;
+      color: var(--text-main);
+      padding: 8px 12px;
+      font-size: .88rem;
+    }
+    select:focus, input:focus { outline: none; border-color: var(--accent-primary); }
+
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      height: 6px; border-radius: 999px;
+      background: rgba(255,255,255,0.14);
+      accent-color: var(--accent-secondary);
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #fff; border: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,.45);
+      cursor: pointer;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #fff; border: none; cursor: pointer;
+    }
+
+    .stat-pill, .tel-pill {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--hair);
+      border-radius: 10px;
+    }
+
+    /* Modals ----------------------------------------------------------------- */
+    .ota-modal-backdrop { background: rgba(4,4,10,0.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+    .ota-modal-panel {
+      background: linear-gradient(180deg, rgba(30,30,52,0.94), rgba(16,16,30,0.96));
+      border: 1px solid var(--hair-strong);
+      border-radius: 24px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    }
+    .ota-modal-header { padding: 18px 22px 6px; }
+    .ota-modal-body { padding: 10px 22px 6px; }
+    .ota-modal-footer { padding: 14px 22px 20px; }
+
+    #toast {
+      background: rgba(20,20,36,0.95);
+      border: 1px solid var(--hair-strong);
+      border-radius: 14px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.5);
+    }
+
+    .rec-overlay { background: rgba(4,4,10,0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+    .rec-panel { border-radius: 22px; }
+
+    @media (max-width: 640px) {
+      .top-bar { padding: 16px 16px 10px; }
+      .menu-bar { margin-left: 0; width: 100%; overflow-x: auto; }
+      .tab-content { padding: 4px 16px 18px; }
+      .zone-box, .control-card { border-radius: 18px; }
+    }
+
   </style>
 </head>
 <body>
@@ -318,11 +521,26 @@
         </div>
 
         <nav class="menu-bar">
-          <button type="button" class="nav-btn active" onclick="openTab(event, 'tab-zones')">Zones</button>
-          <button type="button" class="nav-btn"        onclick="openTab(event, 'tab-advanced')">Advanced</button>
-          <button type="button" class="nav-btn"        onclick="openTab(event, 'tab-update')">Update</button>
-          <button type="button" class="nav-btn" id="eqBtn" title="10-band equalizer">EQ</button>
-          <button type="button" class="nav-btn nav-btn-primary" id="analyzeBtn" title="Record up to 10 min - click Finish Now to end early">&#9210; Analyze</button>
+          <button type="button" class="nav-btn active" onclick="openTab(event, 'tab-zones')">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>
+            Zones
+          </button>
+          <button type="button" class="nav-btn" onclick="openTab(event, 'tab-advanced')">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="15" cy="6" r="2.2"/><circle cx="9" cy="12" r="2.2"/><circle cx="14" cy="18" r="2.2"/></svg>
+            Advanced
+          </button>
+          <button type="button" class="nav-btn" onclick="openTab(event, 'tab-update')">
+            <svg viewBox="0 0 24 24"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14"/></svg>
+            Update
+          </button>
+          <button type="button" class="nav-btn" id="eqBtn" title="10-band equalizer">
+            <svg viewBox="0 0 24 24"><path d="M6 20V10M12 20V4M18 20V13"/><path d="M4 10h4M10 4h4M16 13h4"/></svg>
+            EQ
+          </button>
+          <button type="button" class="nav-btn nav-btn-primary" id="analyzeBtn" title="Record up to 10 min - click Finish Now to end early">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
+            Analyze
+          </button>
         </nav>
 
       </div>
@@ -336,8 +554,7 @@
         <div class="zone-toolbar" style="flex-wrap:wrap;gap:10px; margin-bottom: 10px; display: flex; justify-content: flex-start; align-items: center; width: 100%;">
           <div style="display:flex;gap:10px;align-items:center;">
             <h2 class="section-title" style="margin:0;">Zone Architecture</h2>
-            <button type="button" class="btn-glass" onclick="createNewZone()"
-                    style="border-color: var(--accent-primary); color: var(--accent-primary); padding: 6px 12px; font-size: 0.85rem;">
+            <button type="button" class="btn-glass" onclick="createNewZone()" style="padding: 6px 14px; font-size: 0.82rem;">
               + Add Room
             </button>
           </div>
@@ -2206,6 +2423,8 @@
         eqRender();
         eqScheduleSend();
       });
+      // [eq-deep-link] /#eq opens the equalizer directly (bookmarkable).
+      if (location.hash === '#eq') openEqModal();
     })();
 
     // ====================================================================
