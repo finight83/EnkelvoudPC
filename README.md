@@ -40,10 +40,14 @@ same HTTP API, and serves the same dashboard on port 80.
   of its own audio (WASAPI loopback) and is itself the source.
 - **Network configuration** — the PC is assumed to be on an already-configured
   network; there is no Wi-Fi setup UI or route.
-- **Over-the-air updates** — the PC app is updated by replacing its files;
-  player firmware is updated from each node's own settings page. There are no
-  `/api/ota/*` routes.
+- **Server self-update** — the PC app is updated by replacing its files; there
+  is no over-the-air path for the server itself. Player nodes *are* updated
+  from the Update tab (see "Firmware updates").
 - **Master volume/mute** — controlled by Windows, not the server.
+- **Per-room Quiet** — implemented as a second Opus stream: rooms with Quiet on
+  get the band-passed encode (400 Hz–9.5 kHz + peak limiter, ported from
+  `EVDAudio.h`), every other room gets the plain one. Costs a second encoder
+  while at least one room has it on.
 - **DLNA/UPnP** — `/api/dlna` reflects a `--dlna on|off` flag but no
   SSDP/renderer is implemented.
 - **Server restart** — `/api/restart` returns `{"ok":true}`; pass
@@ -207,11 +211,26 @@ them, run the mock on a different host on the LAN, or run the mock with
 to that port. In practice the audio header test (5) is the load-bearing
 one.
 
+## Firmware updates (player nodes)
+
+Update tab: tick the nodes, pick a `node_<version>.bin`, press **Upload**. The
+server stores the file in `data/ota_spool/`, then pushes it to each ticked node
+one at a time over plain HTTP — `POST http://<node>:80/api/ota`, multipart body
+with one `fw` part, 512-byte writes, 3 attempts, 8 s reply wait. That is the
+same request the ESP32 server sends, so node firmware needs no change.
+
+`GET /api/ota/plan` (spool files + nodes), `GET /api/ota/status` (progress,
+completed/failed), `POST /api/ota/apply`
+(`{"nodes":["<ip>"],"nodeFile":"node_<version>.bin"}`), `POST /api/ota/upload`
+(multipart), `POST /api/ota/delete`. There is no server self-flash: a PC app is
+updated by replacing its files.
+
 ## Persistent state
 
-- `data/zones.json` — zone definitions.
-- `data/encoders.json` — per-mode encoder presets (`off`, `music`,
-  `movie`), plus the currently selected mode.
+- `data/zones.json` — zone definitions (volume, mute and per-room quiet).
+- `data/encoders.json` — per-mode encoder presets (`music`, `movie`; music is
+  the default), plus the currently selected mode.
+- `data/ota_spool/` — uploaded player firmware images (`node_<version>.bin`).
 
 Neither file is required at first run; missing files trigger defaults.
 

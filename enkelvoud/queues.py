@@ -78,3 +78,8 @@ class OpusPacket:
 
 encode_queue: DropOldestQueue[EncodeFrame] = DropOldestQueue(C.ENCODE_QUEUE_LEN)
 opus_queue:   DropOldestQueue[OpusPacket]  = DropOldestQueue(C.OPUS_QUEUE_LEN)
+
+# [quiet-stream] Second Opus stream, produced from the filtered copy of each
+# frame for rooms with Quiet Mode on. Same length/latency budget as opus_queue;
+# sender.quiet_sender drains it, sender.sender ignores those rooms.
+quiet_opus_queue: DropOldestQueue[OpusPacket] = DropOldestQueue(C.OPUS_QUEUE_LEN)

@@ -24,7 +24,10 @@ from typing import Optional
 import numpy as np
 
 from . import constants as C
-from .queues import EncodeFrame, OpusPacket, encode_queue, opus_queue
+from .queues import (
+    EncodeFrame, OpusPacket, encode_queue, opus_queue, quiet_opus_queue,
+)
+from .quiet import QuietFilter
 from .state import runtime
 from .log_ring import log_info, log_warn, log_error
 
@@ -77,6 +80,13 @@ class OpusEncoderThread:
         self._encoder = None            # opuslib.Encoder | None
         self._encoder_rate: int = 0     # rate the current encoder was created at
         self._encoder_app: int = 0      # application the encoder was created with
+        # [quiet-stream] Second encoder + the band-pass/limiter state. Only
+        # used while at least one room has Quiet Mode on.
+        self._qenc = None
+        self._q_rate: int = 0
+        self._q_app: int = 0
+        self._quiet = QuietFilter()
+        self._quiet_active = False
 
     def start(self) -> bool:
         _opus_binding()                 # installs the bundled library if needed
@@ -131,6 +141,26 @@ class OpusEncoderThread:
                     captured_ms=frame.captured_ms,
                     seq=frame.seq,
                 ))
+
+                # ---- Quiet stream: filter this frame, encode it again -----
+                # Only while some room actually has Quiet on; rooms are routed
+                # to this stream by sender.quiet_sender (see queues.py).
+                if runtime.quiet_node_ips():
+                    qenc = self._ensure_quiet_encoder()
+                    if qenc is not None:
+                        quiet_pcm = self._quiet.process(
+                            pcm_bytes, runtime.opus_sample_rate)
+                        quiet_opus_queue.put(OpusPacket(
+                            opus=qenc.encode(quiet_pcm, n_samples),
+                            captured_ms=frame.captured_ms,
+                            seq=frame.seq,
+                        ))
+                    self._quiet_active = True
+                elif self._quiet_active:
+                    # Drop stale filter/limiter history so a later re-enable
+                    # does not start mid-envelope.
+                    self._quiet.reset()
+                    self._quiet_active = False
             except Exception as e:
                 log_warn("Encoder: frame failed: %s", e)
 
@@ -173,6 +203,45 @@ class OpusEncoderThread:
         self._apply_all_settings()
 
         log_info("Encoder: created rate=%d app=%d", rate, app)
+
+    def _ensure_quiet_encoder(self):
+        """Second encoder for the filtered stream, created/reconfigured lazily."""
+        need = (
+            self._qenc is None
+            or self._q_rate != runtime.opus_sample_rate
+            or self._q_app != runtime.new_application
+        )
+        if need:
+            if self._qenc is not None:
+                try:
+                    self._qenc.destroy()
+                except Exception:
+                    pass
+                self._qenc = None
+            rate = runtime.opus_sample_rate
+            app = runtime.new_application
+            try:
+                self._qenc = opuslib.Encoder(
+                    rate, C.CHANNELS, _OPUS_APPLICATIONS[app])
+            except KeyError:
+                self._qenc = opuslib.Encoder(rate, C.CHANNELS, "audio")
+                app = C.OPUS_APPLICATION_AUDIO
+            self._q_rate = rate
+            self._q_app = app
+            log_info("Encoder: quiet stream created rate=%d app=%d", rate, app)
+
+        e = self._qenc
+        if e is None:
+            return None
+        # Mirror the live settings the main encoder is running with. The
+        # one-shot pending_complexity was already consumed by the main path,
+        # so use its effective value.
+        e.bitrate = int(runtime.new_bitrate)
+        e.vbr = bool(runtime.new_vbr)
+        e.vbr_constraint = bool(runtime.new_vbr_constraint)
+        e.signal = int(runtime.new_signal)
+        e.complexity = int(runtime.current_complexity)
+        return e
 
     def _apply_all_settings(self) -> None:
         e = self._encoder

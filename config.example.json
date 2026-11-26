@@ -2,7 +2,7 @@
   "_comment": "Reference file. The runtime persists to ./data/zones.json and ./data/encoders.json; settings here are documentation only.",
 
   "server_name": "Enkelvoud",
-  "fw_version": "3.9.1.2",
+  "fw_version": "3.9.2.1",
 
   "ports": {
     "discovery": 4201,
@@ -17,15 +17,13 @@
     "opus_frame_ms": 20,
     "channels": 2,
     "max_packet_bytes": 1024,
-    "audio_buffer_ms": 120,
+    "audio_buffer_ms": 150,
     "audio_buffer_min_ms": 20,
     "audio_buffer_max_ms": 400
   },
 
   "modes": {
-    "off":   { "bitrate": 96000, "complexity": 4, "vbr": true,
-               "vbr_constraint": true, "signal": "music",
-               "application": "audio", "sample_rate": 48000, "buffer_ms": 120 },
+
     "music": { "bitrate": 96000, "complexity": 4, "vbr": true,
                "vbr_constraint": true, "signal": "music",
                "application": "audio", "sample_rate": 48000, "buffer_ms": 150 },
@@ -54,8 +52,7 @@
   },
 
   "stubs": {
-    "ota_enabled": false,
-    "ota_error": "OTA not supported on PC server",
+
     "bt_error": "source board not present on PC",
     "dlna_enabled": false,
     "allow_process_restart": false

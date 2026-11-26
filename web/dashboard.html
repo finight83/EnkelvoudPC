@@ -321,6 +321,7 @@
           <button type="button" class="nav-btn active" onclick="openTab(event, 'tab-zones')">Zones</button>
           <button type="button" class="nav-btn"        onclick="openTab(event, 'tab-advanced')">Advanced</button>
           <button type="button" class="nav-btn"        onclick="openTab(event, 'tab-update')">Update</button>
+          <button type="button" class="nav-btn nav-btn-primary" id="analyzeBtn" title="Record up to 10 min - click Finish Now to end early">&#9210; Analyze</button>
         </nav>
 
       </div>
@@ -341,12 +342,16 @@
           </div>
         </div>
 
-        <!-- Quiet Mode (frequency limiting). Master volume is controlled by Windows. -->
-        <div class="zones-volume-row" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center; width: 100%;">
-          <button type="button" class="btn-glass" id="btn-quiet" onclick="toggleQuietMode()" title="Quiet Mode (Frequency Limiting)" style="flex: 0 0 auto;">
-            <span id="quiet-icon">🌙</span> <span id="quiet-label">Quiet Mode: Off</span>
-          </button>
-          <span class="muted" style="font-size:0.8rem;">Reduces high-frequency energy for late-night listening.</span>
+        <!-- Multi-server election: drag to rank, top = most preferred. -->
+        <div class="control-card" style="margin-bottom: 16px;">
+          <div class="data-label" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            Servers
+            <span class="stat-pill" id="srv-role">role …</span>
+            <span class="stat-pill" id="srv-leader">leader …</span>
+          </div>
+          <p class="muted" style="font-size:0.78rem;margin:6px 0 0;">Drag to set which server the nodes use — top row = highest priority. Only the leader answers node discovery.</p>
+          <div id="serverList" style="margin-top:10px;display:flex;flex-direction:column;gap:6px;"></div>
+          <div class="muted" id="srv-state" style="font-size:0.75rem;margin-top:6px;"></div>
         </div>
       </div>
       <div class="control-card" id="discoveredCard" style="display:none; margin: 0 30px 16px;">
@@ -360,132 +365,28 @@
 
     <!-- ======================= TAB: ADVANCED ==================== -->
     <div id="tab-advanced" class="tab-content">
-      <div class="sub-tab-bar">
-        <button type="button" class="sub-tab-btn active" data-subtab="adv-status" onclick="openSubTab('adv-status')">Status</button>
-        <button type="button" class="sub-tab-btn" data-subtab="adv-encoding" onclick="openSubTab('adv-encoding')">Encoding</button>
-      </div>
-
-      <!-- ---- ADV > Status ---- -->
-      <div id="adv-status" class="sub-panel active">
-        <div class="stat-row" aria-label="System load">
-          <span class="stat-pill" id="stat-cpu" title="Enkelvoud server CPU (percent of one core)">CPU %</span>
-          <span class="stat-pill" id="stat-sys" title="Whole-PC CPU usage">SYS %</span>
-          <span class="stat-pill" id="stat-ram" title="System memory used">RAM %</span>
-        </div>
-
-        <!-- [servers-decide] Multi-server election: role + draggable priority -->
-        <div class="control-card" style="margin-top:16px;">
-          <div class="data-label" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            Servers
-            <span class="stat-pill" id="srv-role">role …</span>
-            <span class="stat-pill" id="srv-leader">leader …</span>
-          </div>
-          <p class="muted" style="font-size:0.78rem;margin:6px 0 0;">Drag to set which server the nodes use — top row = preferred. Only the leader answers node discovery.</p>
-          <div id="serverList" style="margin-top:10px;display:flex;flex-direction:column;gap:6px;"></div>
-          <div class="log-controls" style="margin-top:10px;align-items:center;">
-            <span class="muted" style="font-size:0.78rem;">Priority (1 = highest)</span>
-            <input type="number" id="srv-priority" min="1" max="99" style="width:70px;padding:6px;border-radius:8px;border:1px solid #343440;background:#0d0d12;color:var(--text);">
-            <button type="button" class="btn-glass" onclick="applyPriority()">Apply</button>
-            <span class="muted" id="srv-state" style="font-size:0.78rem;"></span>
-          </div>
-        </div>
-
-        <h2 class="section-title" style="font-size:1rem;margin-bottom:10px;">Stream Telemetry</h2>
-        <div class="telemetry-bar">
-          <span class="tel-pill"><b id="stat-mode">--</b>mode</span>
-          <span class="tel-pill" title="Configured playback target sent to nodes"><b id="stat-buffer">--</b>target buffer</span>
-          <span class="tel-pill" title="Average of node-reported latency"><b id="stat-latency">--</b>node latency</span>
-          <span class="tel-pill"><b id="stat-clients">--</b>clients</span>
-        </div>
-
-        <div class="log-controls" style="margin-top:6px;align-items:center;">
-          <button type="button" class="btn-glass" id="status-advanced-toggle">Show advanced</button>
-          <button type="button" class="btn-glass" id="analyzeBtn" title="Record up to 10 min — click Finish Now to end early">
-            ⏺ Analyze / Record (10 min max)
-          </button>
-          <span class="muted" id="status-advanced-state">basic view</span>
-        </div>
-
-        <div id="status-advanced-panel" style="display:none;">
-          <div class="grid-2" style="margin-top:16px;">
-            <div class="control-card" style="grid-column: span 2;">
-              <div class="data-label">Node Latencies</div>
-              <p style="font-size:0.85rem;color:var(--text-muted);margin-top:5px;" id="stat-nodes">Fetching…</p>
-            </div>
-            <div class="control-card" style="grid-column: span 2;">
-              <div class="data-label">Diagnostics</div>
-              <p style="font-size:0.85rem;color:var(--text-muted);margin-top:5px;" id="stat-diag">Fetching…</p>
-            </div>
-            <div class="control-card" style="grid-column: span 2;">
-              <div class="data-label">Audio Pipeline (last window)</div>
-              <p style="font-size:0.85rem;color:var(--text-muted);margin-top:5px;" id="stat-pipeline">Fetching…</p>
-            </div>
-          </div>
-          <div class="data-label" style="margin-top:18px;">Raw /api/stats JSON</div>
-          <pre id="status-raw-json" style="font-size:0.78rem;max-height:40vh;overflow:auto;background:rgba(0,0,0,0.35);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);white-space:pre-wrap;margin-top:8px;">(waiting for poll…)</pre>
-        </div>
-
-        <div class="log-controls">
-          <button type="button" class="btn-glass" id="status-log-pause">Pause</button>
-          <button type="button" class="btn-glass" id="status-log-clear">Clear</button>
-          <span class="muted" id="status-log-state">polling</span>
-        </div>
-
-        <div class="log-controls" style="margin-top:14px;align-items:center;">
-          <button type="button" class="btn-glass" id="status-advanced-log">Enable advanced logging</button>
-          <span class="muted" id="status-advanced-log-state">off (errors only)</span>
-        </div>
-
-        <div class="log-controls" style="margin-top:14px;align-items:center;">
-          <button type="button" class="btn-glass" id="status-dlna-toggle" disabled>DLNA: …</button>
-          <span class="muted" id="status-dlna-state">loading</span>
-        </div>
-
-        <div id="status-log-viewer" style="display:none;margin-top:14px;">
-          <div class="data-label">Serial Log (live)</div>
-          <pre id="status-log-pre" style="font-size:0.78rem;max-height:40vh;overflow:auto;background:rgba(0,0,0,0.35);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);white-space:pre-wrap;margin-top:8px;">(waiting for lines…)</pre>
-          <div class="log-controls" style="margin-top:8px;">
-            <button type="button" class="btn-glass" id="status-logview-clear">Clear</button>
-            <span class="muted" id="status-logview-state">idle</span>
-          </div>
-        </div>
-      </div>
-
       <!-- ---- ADV > Encoding ---- -->
-      <div id="adv-encoding" class="sub-panel">
-        <h2 class="section-title" style="font-size:1.1rem;">Opus Encoder</h2>
+      <div id="adv-encoding" class="sub-panel active">
 
         <div class="enc-card">
-          <h3>Playback Mode (Preset)</h3>
           <div class="enc-field" style="border-bottom: none; padding-bottom: 0;">
             <span class="enc-label">Mode</span>
             <select id="mode-select" class="mode-select" style="width: 140px;" aria-label="Playback mode">
-              <option value="off">Off</option>
-              <option value="music">Music</option>
+              <option value="music" selected>Music</option>
               <option value="movie">Movie</option>
             </select>
           </div>
-          <p class="enc-hint">
-            Selecting a preset automatically adjusts the node's target latency, audio buffer, and encoder complexity.
-            (Use the 🌙 Quiet Mode button on the Zones tab for frequency limiting).
-          </p>
         </div>
 
         <div class="enc-card">
-          <h3>Target Quality</h3>
           <div class="enc-target-row">
             <span class="enc-label">Target Bitrate</span>
             <input type="range" id="enc-bitrate" min="32" max="192" step="8" value="96">
             <span class="enc-target-val" id="enc-bitrate-val">96 kbps</span>
           </div>
-          <p class="enc-hint">
-            Suggested fields below auto-calculate from the target bitrate. Click
-            the <b>🔓 lock</b> button to override any value manually.
-          </p>
         </div>
 
       <div class="enc-card">
-        <h3>Target Buffer Latency</h3>
         <div class="enc-target-row">
           <span class="enc-label">Buffer (ms)</span>
           <!-- [buffer-latency-floor] min matches AUDIO_BUFFER_MIN_MS (EVDState.h).
@@ -494,15 +395,9 @@
           <input type="range" id="buffer-latency" min="20" max="300" step="5" value="150">
           <span class="enc-target-val" id="buffer-latency-val">150 ms</span>
         </div>
-        <p class="enc-hint">
-          This configured target (<code>bufferMs</code>) is sent to every player.
-          Node-reported latency and actual playout timing are separate measurements.
-          Higher values increase resistance to network jitter but increase latency.
-        </p>
       </div>
 
         <div class="enc-card">
-          <h3>Encoder Settings</h3>
           <div class="enc-field auto" data-field="complexity">
             <span class="enc-label">Complexity (0–10)</span>
             <span class="enc-value" id="enc-complexity-val">8</span>
@@ -550,7 +445,6 @@
         </div>
 
         <div class="enc-card">
-          <h3>Opus Sample Rate</h3>
           <div class="enc-field" style="border-bottom: none; padding-bottom: 0;">
             <span class="enc-label">Encoder / Node Decoder Rate</span>
             <select id="enc-sampleRate-in" class="mode-select" style="width: auto; min-width: 220px;" aria-label="Opus sample rate">
@@ -558,58 +452,38 @@
               <option value="24000">24 kHz (lower CPU on nodes)</option>
             </select>
           </div>
-          <p class="enc-hint">
-            Changing the rate re-creates the server encoder and notifies every
-            node to re-create its decoder at the matching rate. Audio pauses
-            for ~40&nbsp;ms during the switch. Use 24&nbsp;kHz to save <b>server</b>
-            encoding CPU and bandwidth; node decoders will consume slightly
-            <i>more</i> CPU due to resampling, and audio content above 12&nbsp;kHz
-            is permanently discarded.
-          </p>
         </div>
 
-<div class="enc-card">
-  <h3>Transport / Buffer</h3>
-  <div class="enc-field readonly"><span class="enc-label">Source Sample Rate</span><span class="enc-value" id="enc-source-rate">— Hz</span></div>
-          <div class="enc-field readonly"><span class="enc-label">Opus Sample Rate</span><span class="enc-value" id="enc-opus-rate">48,000 Hz</span></div>
-          <div class="enc-field readonly"><span class="enc-label">Channels</span><span class="enc-value">2 (Stereo)</span></div>
-          <div class="enc-field readonly"><span class="enc-label">Frame Duration</span><span class="enc-value">20 ms (960 samples)</span></div>
-<div class="enc-field readonly"><span class="enc-label">Max Packet</span><span class="enc-value">1024 bytes</span></div>
-          <div class="enc-field readonly"><span class="enc-label">Application Mode</span><span class="enc-value">Runtime (see above)</span></div>
-        </div>
-
-        <div style="display:flex;gap:10px;">
+<div style="display:flex;gap:10px;">
           <button type="button" class="btn btn-primary" id="enc-save" style="flex:2;">Save</button>
           <button type="button" class="btn" id="enc-revert" style="flex:1;" title="Discard unsaved changes for this mode">Revert</button>
           <button type="button" class="btn" id="enc-defaults" style="flex:0 0 auto;" title="Load factory defaults for this mode">Load Defaults</button>
         </div>
-        <p class="enc-hint" style="margin-top:14px;">
-          <b>Note:</b> bitrate/VBR/signal changes take effect on the next encoder
-          tick. Sample-rate and application-mode changes re-create the encoder
-          automatically on the PC server (no restart needed).
-        </p>
       </div>
     </div>
 
     <!-- ======================= TAB: UPDATE ==================== -->
     <div id="tab-update" class="tab-content">
-      <h2 class="section-title">Software Updates</h2>
       <div class="control-card">
-        <div class="data-label">This PC (server)</div>
-        <div class="data-value" id="update-server-version">—</div>
-        <p class="muted" style="margin-top:8px;line-height:1.5;">
-          The PC application is updated by replacing the files in its install
-          folder and restarting it. There is no over-the-air update for the PC.
-        </p>
-      </div>
-      <div class="control-card" style="margin-top:16px;">
-        <div class="data-label">Player nodes</div>
+        <div class="data-label" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          Player nodes
+          <button type="button" class="btn-glass" id="otaSelectAll" style="padding:4px 10px;font-size:0.75rem;">Select all</button>
+          <span class="muted" id="otaSelState" style="font-size:0.78rem;">0 selected</span>
+        </div>
         <div id="update-node-list"><p class="muted">No player nodes registered.</p></div>
-        <p class="muted" style="margin-top:8px;line-height:1.5;">
-          Player firmware is updated from each node's own settings page &mdash; the
-          <span style="white-space:nowrap;">&#9881;</span> button on the Zones tab opens it.
-          The server does not push updates to nodes.
-        </p>
+      </div>
+
+      <div class="control-card" style="margin-top:16px;">
+        <div class="data-label">Firmware image</div>
+        <div class="log-controls" style="margin-top:8px;align-items:center;gap:10px;flex-wrap:wrap;">
+          <input type="file" id="otaFile" accept=".bin" style="max-width:300px;">
+          <button type="button" class="btn btn-primary" id="otaUploadBtn">Upload</button>
+          <span class="muted" id="otaMsg" style="font-size:0.8rem;">node_&lt;version&gt;.bin</span>
+        </div>
+        <div class="rec-progress-bar" id="otaProgressWrap" style="margin-top:14px;display:none;">
+          <div class="rec-progress-fill" id="otaProgressFill" style="width:0%"></div>
+        </div>
+        <div id="otaResultList" style="margin-top:12px;font-size:0.85rem;line-height:1.7;"></div>
       </div>
     </div>
   </div>
@@ -715,10 +589,9 @@
     }
 
     // ---- Global state ---------------------------------------------------
-    var isQuietMode   = false;
     var currentTabId  = 'tab-zones';
-    var currentSubTab = 'adv-status';
-    var playbackMode  = 'off';
+    var currentSubTab = 'adv-encoding';
+    var playbackMode  = 'music';
     var zonesData     = [];
     var zonesKey      = '';
     var playersData   = [];
@@ -818,20 +691,6 @@
 
       if (currentSubTab === 'adv-encoding') loadEncoderSettings();
     }
-
-    function paintQuietMode() {
-      var btn = $('btn-quiet'), icon = $('quiet-icon'), label = $('quiet-label');
-      if (!btn) return;
-      btn.classList.toggle('active', isQuietMode);
-      if (icon) icon.textContent = isQuietMode ? '🌕' : '🌙';
-      if (label) label.textContent = isQuietMode ? 'Quiet Mode: On' : 'Quiet Mode: Off';
-    }
-    async function toggleQuietMode() {
-      isQuietMode = !isQuietMode;
-      paintQuietMode();
-      await api('/api/config', 'POST', { quietMode: isQuietMode });
-    }
-    window.toggleQuietMode = toggleQuietMode;
 
     // ====================================================================
     //  Name modal
@@ -1002,10 +861,6 @@
         // not keep showing the previous mode's values.
         if (currentSubTab === 'adv-encoding') loadEncoderSettings();
       }
-      if (s.quietMode !== undefined && s.quietMode !== isQuietMode) {
-        isQuietMode = s.quietMode;
-        paintQuietMode();
-      }
       if (s.zones) {
         var k = JSON.stringify(s.zones);
         if (k !== zonesKey) { zonesKey = k; zonesData = s.zones; renderZones(); }
@@ -1054,11 +909,18 @@
               '<input type="range" min="0" max="100" value="' + zone.volume + '" ' +
                      'oninput="zoneVolLive(\'' + zone.id + '\', this.value)" ' +
                      'onchange="updateZoneVolume(\'' + zone.id + '\', this.value)">' +
-              '<div class="zone-actions">' +
+              '<div class="zone-actions" style="display:flex;gap:6px;flex-wrap:wrap;">' +
                 '<button type="button" class="btn-glass ' + (zone.muted ? 'btn-mute-active' : '') + '" ' +
                         'style="padding:5px 12px;font-size:0.78rem;" ' +
                         'onclick="toggleZoneMute(\'' + zone.id + '\')">' +
                   (zone.muted ? 'Unmute' : 'Mute Room') +
+                '</button>' +
+                '<button type="button" class="btn-glass" ' +
+                        'style="padding:5px 12px;font-size:0.78rem;' +
+                        (zone.quiet ? 'border-color:var(--accent-primary);color:var(--accent-primary);' : '') + '" ' +
+                        'title="Quiet Mode: reduces high-frequency energy in this room" ' +
+                        'onclick="toggleZoneQuiet(\'' + zone.id + '\')">' +
+                  (zone.quiet ? 'Quiet: On' : 'Quiet') +
                 '</button>' +
               '</div>' +
             '</div>' +
@@ -1152,8 +1014,6 @@
       if (leadEl) {
         leadEl.textContent = 'leader: ' + (leader ? (leader.self ? 'this server' : (leader.name || leader.id)) : '?');
       }
-      var prioEl = $('srv-priority');
-      if (prioEl && document.activeElement !== prioEl) prioEl.value = s.priority;
       var html = '';
       (serversData || []).forEach(function(sv, idx){
         var down = (sv.alive === false) && !sv.self;
@@ -1168,7 +1028,7 @@
             '<span class="muted" style="width:16px;text-align:right;">' + (idx + 1) + '</span>' +
             '<strong>' + escHtml(sv.name || sv.id) + '</strong>' +
             (sv.self ? '<span class="stat-pill" title="this server">this</span>' : '') +
-            '<span class="muted" style="font-size:.78rem;">' + escHtml(sv.ip) + ' &middot; prio ' + escHtml(sv.priority) + '</span>' +
+            '<span class="muted" style="font-size:.78rem;">' + escHtml(sv.ip) + '</span>' +
             badge +
           '</div>';
       });
@@ -1205,18 +1065,6 @@
       if (st) st.textContent = 'applying…';
       api('/api/servers/order', 'POST', { order: order }).then(function(r){
         if (st) st.textContent = (r && r.ok) ? 'order applied' : 'apply failed';
-        refreshStatus();
-      });
-    };
-    window.applyPriority = function() {
-      var el = $('srv-priority');
-      if (!el) return;
-      var v = parseInt(el.value, 10);
-      if (!v || v < 1) return;
-      var st = $('srv-state');
-      if (st) st.textContent = 'applying…';
-      api('/api/servers/priority', 'POST', { priority: v }).then(function(r){
-        if (st) st.textContent = (r && r.ok) ? ('priority ' + r.priority) : 'failed';
         refreshStatus();
       });
     };
@@ -1258,6 +1106,12 @@
     };
     window.updateZoneVolume = async function(zoneId, volume) {
       await api('/api/zones/config', 'POST', { zoneId: zoneId, volume: parseInt(volume, 10) });
+    };
+    window.toggleZoneQuiet = async function(zoneId) {
+      var z = zonesData.find(function(x){ return x.id === zoneId; });
+      if (!z) return;
+      await api('/api/zones/config', 'POST', { zoneId: zoneId, quiet: !z.quiet });
+      refreshStatus();
     };
     window.toggleZoneMute = async function(zoneId) {
       var z = zonesData.find(function(x){ return x.id === zoneId; });
@@ -1830,6 +1684,41 @@
       lines.push('Samples:    ' + samples.length);
       lines.push('');
 
+      // [status-tab-fold] Advanced > Status was removed from the UI; the
+      // numbers it used to show are folded in here so a recording still
+      // carries them: mode, buffer, clients, CPU/RAM, per-node latency and
+      // the pipeline counters.
+      var s0 = first.state || {};
+      var q0 = first.stats || {};
+      var n0 = (q0.nodes || []);
+      lines.push('');
+      lines.push('=== Server State (first sample) ===');
+      lines.push('Mode:        ' + (s0.mode || '?'));
+      lines.push('Buffer:      ' + (s0.audioBufferMs != null ? s0.audioBufferMs + ' ms' : '?'));
+      lines.push('Clients:     ' + (s0.clientCount != null ? s0.clientCount
+                                : (s0.players ? s0.players.length : '?')));
+      lines.push('Process CPU: ' + (q0.cpuPct != null ? q0.cpuPct + ' %' : '?') +
+                 '   System CPU: ' + (q0.sysCpuPct != null ? q0.sysCpuPct + ' %' : '?'));
+      lines.push('RAM used:    ' + (q0.heapUsedPct != null ? q0.heapUsedPct + ' %' : '?'));
+      if (n0.length) {
+        lines.push('');
+        lines.push('=== Node Latency (first sample) ===');
+        for (var ni = 0; ni < n0.length; ni++) {
+          var nn = n0[ni];
+          lines.push('  ' + nn.ip +
+                     '  ' + (nn.latencyMs != null ? nn.latencyMs + ' ms' : '?') +
+                     '  queue ' + (nn.queueDepth != null ? nn.queueDepth : '?') +
+                     '/' + (nn.target != null ? nn.target : '?') +
+                     '  rebuffers ' + (nn.rebuffers != null ? nn.rebuffers : '?'));
+        }
+      }
+      lines.push('');
+      lines.push('=== Pipeline (last sample) ===');
+      lines.push('  opus encoded (win): ' + (lastStats && lastStats.opusEncodedLastWin != null ? lastStats.opusEncodedLastWin : '?') +
+                 '   dropped (win): ' + (lastStats && lastStats.opusDroppedLastWin != null ? lastStats.opusDroppedLastWin : '?') +
+                 '   udp pkts (win): ' + (lastStats && lastStats.udpPacketsLastWin != null ? lastStats.udpPacketsLastWin : '?') +
+                 '   udp bytes (win): ' + (lastStats && lastStats.udpBytesLastWin != null ? lastStats.udpBytesLastWin : '?'));
+
       lines.push('=== Column Legend ===');
       lines.push('t      = seconds from start');
       lines.push('cpu    = process CPU %');
@@ -2002,39 +1891,166 @@
     // ====================================================================
     //  Update tab
     // ====================================================================
+    // ====================================================================
+    //  Update tab: tick nodes, upload one .bin, push it
+    // ====================================================================
+    function otaRefreshSelection() {
+      var boxes = document.querySelectorAll('#update-node-list .otaNodeChk');
+      var n = 0;
+      Array.prototype.forEach.call(boxes, function(b){ if (b.checked) n++; });
+      var st = $('otaSelState');
+      if (st) st.textContent = n + ' selected';
+      var all = $('otaSelectAll');
+      if (all && boxes.length) all.textContent = (n === boxes.length && n > 0) ? 'Clear all' : 'Select all';
+    }
+
+    window.otaToggleAll = function() {
+      var boxes = document.querySelectorAll('#update-node-list .otaNodeChk');
+      var allChecked = boxes.length > 0;
+      Array.prototype.forEach.call(boxes, function(b){ if (!b.checked) allChecked = false; });
+      Array.prototype.forEach.call(boxes, function(b){ b.checked = !allChecked; });
+      otaRefreshSelection();
+    };
+
     async function renderUpdate() {
-      var verEl = $('update-server-version');
-      try {
-        var fw = await api('/api/fw', 'GET', undefined, { silent: true });
-        if (verEl && fw && fw.version) verEl.textContent = 'v' + fw.version;
-      } catch (e) {}
       var listEl = $('update-node-list');
       if (!listEl) return;
       var s = await api('/api/state', 'GET', undefined, { silent: true });
       var players = (s && s.players) || [];
       if (!players.length) {
         listEl.innerHTML = '<p class="muted">No player nodes registered.</p>';
+        otaRefreshSelection();
         return;
       }
       var html = '';
       players.forEach(function(p){
         var name = String(p.name || p.ip).replace(/[<>&"]/g, '');
-        var ver = p.version ? 'v' + String(p.version).replace(/[^0-9A-Za-z._-]/g, '') : '—';
-        var age = '';
-        if (typeof p.lastSeenAgeMs === 'number') {
-          var ageS = Math.round(p.lastSeenAgeMs / 1000);
-          var ageTxt = ageS < 2 ? 'just now' : (ageS + 's ago');
-          var stale = ageS > 45;
-          age = ' · <span style="color:' + (stale ? 'var(--warn)' : 'var(--text-muted)') + ';">' +
-                'seen ' + ageTxt + '</span>';
-        }
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' +
-                  '<span style="font-weight:600;">' + name + '</span>' +
-                  '<span style="color:var(--text-muted);font-family:ui-monospace,monospace;">' + p.ip + ' · ' + ver + age + '</span>' +
-                '</div>';
+        var ver = p.version ? 'v' + String(p.version).replace(/[^0-9A-Za-z._-]/g, '') : 'unknown';
+        var seen = (typeof p.lastSeenAgeMs === 'number') ? Math.round(p.lastSeenAgeMs / 1000) : null;
+        var stale = seen !== null && seen > 45;
+        html +=
+          '<label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;">' +
+            '<input type="checkbox" class="otaNodeChk" value="' + p.ip + '" style="width:18px;height:18px;accent-color:#8e2de2;">' +
+            '<span style="font-weight:600;flex:1 1 auto;">' + name + '</span>' +
+            '<span style="color:var(--text-muted);font-family:ui-monospace,monospace;font-size:0.8rem;">' +
+              p.ip + ' &middot; ' + ver +
+              (seen !== null ? ' &middot; <span style="color:' + (stale ? 'var(--warn)' : 'var(--text-muted)') + ';">seen ' + seen + 's ago</span>' : '') +
+            '</span>' +
+          '</label>';
       });
       listEl.innerHTML = html;
+      otaRefreshSelection();
     }
+
+    function otaSetMsg(text) { var el = $('otaMsg'); if (el) el.textContent = text; }
+
+    window.otaUploadAndPush = async function() {
+      var fileEl = $('otaFile');
+      var selected = [];
+      Array.prototype.forEach.call(document.querySelectorAll('#update-node-list .otaNodeChk'), function(b){
+        if (b.checked) selected.push(b.value);
+      });
+      var file = fileEl && fileEl.files && fileEl.files[0];
+      if (!file) { toast('Choose a firmware .bin first', 'err'); return; }
+      if (!/^node_[0-9A-Za-z._-]+\.bin$/i.test(file.name)) {
+        toast('Firmware file must be named node_<version>.bin', 'err');
+        return;
+      }
+      if (!selected.length) { toast('Tick at least one node', 'err'); return; }
+
+      var btn = $('otaUploadBtn');
+      if (btn) btn.disabled = true;
+      var barWrap = $('otaProgressWrap'), bar = $('otaProgressFill');
+      if (barWrap) barWrap.style.display = '';
+      if (bar) bar.style.width = '0%';
+      otaSetMsg('uploading ' + file.name + '…');
+
+      var fd = new FormData();
+      fd.append('fw', file, file.name);
+      var up = await new Promise(function(resolve){
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/ota/upload');
+        xhr.upload.onprogress = function(e){
+          if (e.lengthComputable && bar) bar.style.width = Math.round(e.loaded * 100 / e.total) + '%';
+        };
+        xhr.onload = function(){
+          var out = { ok: false };
+          try { out = JSON.parse(xhr.responseText); } catch (e) {}
+          if (!out.ok) out.error = out.error || ('HTTP ' + xhr.status);
+          resolve(out);
+        };
+        xhr.onerror = function(){ resolve({ ok: false, error: 'upload failed' }); };
+        xhr.send(fd);
+      });
+      if (!up.ok) {
+        otaSetMsg('upload failed: ' + (up.error || 'unknown error'));
+        if (btn) btn.disabled = false;
+        return;
+      }
+
+      otaSetMsg('pushing to ' + selected.length + ' node(s)…');
+      var apply = await api('/api/ota/apply', 'POST', { nodes: selected, nodeFile: up.name });
+      if (!apply || !apply.ok) {
+        otaSetMsg('push failed: ' + ((apply && apply.error) || 'unknown error'));
+        if (btn) btn.disabled = false;
+        return;
+      }
+      otaPollStatus(selected);
+    };
+
+    var otaPollTimer = null;
+    function otaPollStatus(targets) {
+      if (otaPollTimer) clearInterval(otaPollTimer);
+      var failures = 0;
+      var stop = function(msg) {
+        if (otaPollTimer) { clearInterval(otaPollTimer); otaPollTimer = null; }
+        otaSetMsg(msg);
+        var btn = $('otaUploadBtn');
+        if (btn) btn.disabled = false;
+      };
+      var paint = function() {
+        api('/api/ota/status', 'GET', undefined, { silent: true }).then(function(st){
+          if (!st || !st.ok) {
+            // [ota-poll-guard] A server restart or a network blip must not
+            // leave "pushing…" and a disabled Upload button forever.
+            if (++failures >= 5) stop('lost contact with the server — status unknown');
+            return;
+          }
+          failures = 0;
+          var bar = $('otaProgressFill');
+          if (bar && st.inProgress) bar.style.width = Math.max(3, st.progressPct || 0) + '%';
+          var list = $('otaResultList');
+          if (list) {
+            var html = '';
+            (targets || []).forEach(function(ip){
+              var done = (st.completed || []).indexOf(ip) >= 0;
+              var failed = (st.failed || []).indexOf(ip) >= 0;
+              html += '<div>' + (done ? '✔' : (failed ? '✖' : '…')) + ' ' + ip +
+                      (failed ? ' <span class="muted">' + (st.error || 'failed') + '</span>' : '') +
+                      '</div>';
+            });
+            list.innerHTML = html;
+          }
+          if (!st.inProgress) {
+            stop('done — ' + (st.completed || []).length + ' updated, ' +
+                 (st.failed || []).length + ' failed');
+          }
+        });
+      };
+      paint();
+      otaPollTimer = setInterval(paint, 1000);
+    }
+
+    (function(){
+      var btn = $('otaUploadBtn');
+      if (btn) btn.addEventListener('click', window.otaUploadAndPush);
+      var all = $('otaSelectAll');
+      if (all) all.addEventListener('click', window.otaToggleAll);
+      var list = $('update-node-list');
+      if (list) list.addEventListener('change', function(e){
+        if (e.target && e.target.classList && e.target.classList.contains('otaNodeChk')) otaRefreshSelection();
+      });
+    })();
 
     // ====================================================================
     //  Analyze button

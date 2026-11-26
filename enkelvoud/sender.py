@@ -40,7 +40,7 @@ import time
 
 from . import constants as C
 from .pacer import AudioFramePacer
-from .queues import opus_queue
+from .queues import opus_queue, quiet_opus_queue
 from .state import runtime, now_ms
 from .log_ring import log_info, log_warn, log_error
 
@@ -60,7 +60,16 @@ def _pack_header(seq: int, captured_ms: int) -> bytes:
 
 
 class AudioSender:
-    def __init__(self) -> None:
+    """One paced 20 ms stream. `quiet_stream` selects the filtered variant.
+
+    Two instances run side by side: the normal one sends to rooms with Quiet
+    off, the quiet one only to rooms with Quiet on. Each node receives exactly
+    one stream, so per-stream seq/captured_ms continuity still holds.
+    """
+
+    def __init__(self, quiet_stream: bool = False) -> None:
+        self._quiet_stream = quiet_stream
+        self._queue = quiet_opus_queue if quiet_stream else opus_queue
         self._sock: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -71,10 +80,12 @@ class AudioSender:
         self._sock.setblocking(True)
 
         self._thread = threading.Thread(
-            target=self._run, name="sender", daemon=True,
+            target=self._run,
+            name="sender-quiet" if self._quiet_stream else "sender",
+            daemon=True,
         )
         self._thread.start()
-        log_info("Sender: thread started")
+        log_info("Sender%s: thread started", " (quiet)" if self._quiet_stream else "")
 
     def stop(self) -> None:
         self._stop.set()
@@ -92,7 +103,7 @@ class AudioSender:
         has_last = False
 
         while not self._stop.is_set():
-            pkt = opus_queue.get(timeout=0.1)
+            pkt = self._queue.get(timeout=0.1)
             arrival_ms = now_ms()
             runtime.udp_send_loop_count += 1
 
@@ -123,7 +134,7 @@ class AudioSender:
                 time.sleep(min(until, 100) / 1000.0)
 
             post_ms = now_ms()
-            queued = opus_queue.qsize()
+            queued = self._queue.qsize()
 
             if not pacer.prepare_frame(post_ms, C.OPUS_FRAME_MS, queued, packet_gap):
                 runtime.udp_send_stall_resets += 1
@@ -151,6 +162,9 @@ class AudioSender:
         # server simply sends them no audio until the operator drags them
         # into a zone on the dashboard.
         assigned = runtime.assigned_node_ips()
+        # [quiet-stream] Which rooms asked for the filtered stream. The two
+        # senders are disjoint: a node is in exactly one of them.
+        quiet_ips = runtime.quiet_node_ips()
         sent_ips: list[tuple[str, bool]] = []
 
         for s in subs:
@@ -159,6 +173,9 @@ class AudioSender:
                 continue
             # a2. Not assigned to a room yet -> muted.
             if s.ip not in assigned:
+                continue
+            # a3. Route by the room's Quiet flag.
+            if (s.ip in quiet_ips) != self._quiet_stream:
                 continue
             # b. Send-failure gate.
             if s.consecutive_send_failures >= C.MAX_SEND_FAILURES_BEFORE_SKIP:
@@ -205,5 +222,6 @@ class AudioSender:
             runtime.stat_latency_count += 1
 
 
-# Singleton
+# Singletons
 sender = AudioSender()
+quiet_sender = AudioSender(quiet_stream=True)

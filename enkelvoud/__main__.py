@@ -30,6 +30,7 @@ from . import ctrl as ctrl_mod
 from . import discovery as discovery_mod
 from . import encoder as encoder_mod
 from . import encoding_ctl
+from . import ota
 from . import peers as peers_mod
 from . import registry
 from . import sender as sender_mod
@@ -158,6 +159,7 @@ def main(argv=None) -> int:
     zone_ctl.set_persistence_path(os.path.join(args.data_dir, "zones.json"))
     encoding_ctl.set_persistence_path(
         os.path.join(args.data_dir, "encoders.json"))
+    ota.set_spool_dir(os.path.join(args.data_dir, "ota_spool"))
 
     # ---- Initial state --------------------------------------------------
     runtime.log_level = args.log_level
@@ -234,6 +236,7 @@ def main(argv=None) -> int:
 
     if capture_ok and encoder_ok:
         sender_mod.sender.start()
+        sender_mod.quiet_sender.start()
     else:
         log_warn("Sender will not start (capture or encoder unavailable)")
 
@@ -271,6 +274,10 @@ def main(argv=None) -> int:
             pass
         try:
             sender_mod.sender.stop()
+        except Exception:
+            pass
+        try:
+            sender_mod.quiet_sender.stop()
         except Exception:
             pass
 

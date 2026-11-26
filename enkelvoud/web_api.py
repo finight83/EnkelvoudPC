@@ -18,6 +18,7 @@ from . import constants as C
 from . import ctrl
 from . import discovery
 from . import encoding_ctl
+from . import ota
 from . import peers as peers_mod
 from . import registry
 from . import sysinfo
@@ -123,7 +124,7 @@ def _build_state_response() -> dict:
                 })
         zone_json.append({
             "id": z.id, "name": z.name, "volume": z.volume,
-            "muted": z.muted, "nodes": node_entries,
+            "muted": z.muted, "quiet": z.quiet, "nodes": node_entries,
         })
 
     # [servers-decide] Election state for the dashboard's Servers card.
@@ -256,6 +257,9 @@ def _build_stats_response() -> dict:
 def create_app(web_dir: str, allow_restart: bool = False,
                allow_ota_success: bool = False) -> Flask:
     app = Flask("enkelvoud")
+    # Werkzeug's form parser spills request bodies to disk before a route sees
+    # them, so cap the whole request rather than trusting the per-part length.
+    app.config["MAX_CONTENT_LENGTH"] = ota.MAX_FW_BYTES + (1 << 20)
 
     dashboard_path = os.path.join(web_dir, "dashboard.html")
 
@@ -522,9 +526,9 @@ def create_app(web_dir: str, allow_restart: bool = False,
 
         if "mode" in data and isinstance(data["mode"], str):
             m = data["mode"].lower()
-            if m not in ("off", "music", "movie"):
+            if m not in C.MODE_NAMES:
                 return _json({"ok": False,
-                              "error": "mode must be off, music, or movie"}, 400)
+                              "error": "mode must be music or movie"}, 400)
 
         if "serverName" in data and isinstance(data["serverName"], str):
             v = data["serverName"]
@@ -538,10 +542,13 @@ def create_app(web_dir: str, allow_restart: bool = False,
 
         if "mode" in data and isinstance(data["mode"], str):
             m = data["mode"].lower()
-            if m in ("off", "music", "movie"):
+            if m in C.MODE_NAMES:
                 encoding_ctl.capture_live_into_mode(runtime.playback_mode_idx)
                 runtime.playback_mode_idx = C.MODE_NAMES.index(m)
                 encoding_ctl.apply_mode_settings_to_live(runtime.playback_mode_idx)
+                # Persist the choice: load_encoders_from_disk() reads play_mode
+                # back on startup, so without this the mode silently reverts.
+                encoding_ctl.save_encoders_to_disk()
                 changed = True
 
         if "quietMode" in data and isinstance(data["quietMode"], bool):
@@ -691,6 +698,58 @@ def create_app(web_dir: str, allow_restart: bool = False,
         runtime.remove_node_perf(ip)
         log_info("Node forgotten (test hook): %s", ip)
         return _json({"ok": True, "forgot": ip})
+
+    # ---- OTA (player firmware push) ------------------------------------
+    # The PC keeps a spool of .bin files and pushes one to the nodes the
+    # operator ticked. A node accepts a plain multipart POST on its own
+    # /api/ota - the same request the ESP32 server's otaPushToNode() sends.
+    # There is no server self-flash: the PC app is updated by replacing files.
+    @app.route("/api/ota/plan", methods=["GET"])
+    def api_ota_plan():
+        return _json(ota.plan())
+
+    @app.route("/api/ota/status", methods=["GET"])
+    def api_ota_status():
+        return _json(ota.status())
+
+    @app.route("/api/ota/upload", methods=["POST"])
+    def api_ota_upload():
+        if request.content_length and request.content_length > ota.MAX_FW_BYTES + 65536:
+            return _json({"ok": False, "error": "firmware too large"}, 413)
+        storage = next(iter(request.files.values()), None)
+        if storage is None:
+            return _json({"ok": False, "error": "no file part"}, 400)
+        status_code, body = ota.save_upload(storage)
+        return _json(body, status_code)
+
+    @app.route("/api/ota/apply", methods=["POST"])
+    def api_ota_apply():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict):
+            return _json({"ok": False, "error": "bad json"}, 400)
+        status_code, body = ota.start_job(data.get("nodes"),
+                                          data.get("nodeFile", ""))
+        return _json(body, status_code)
+
+    @app.route("/api/ota/delete", methods=["POST"])
+    def api_ota_delete():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict):
+            return _json({"ok": False, "error": "bad json"}, 400)
+        status_code, body = ota.delete_file(data.get("name", ""))
+        return _json(body, status_code)
+
+    @app.route("/api/player/ota_result", methods=["POST"])
+    def api_player_ota_result():
+        data = _try_parse_json()
+        ota.note_result(data if isinstance(data, dict) else {})
+        return _json({"ok": True})
 
     @app.route("/api/restart", methods=["POST"])
     def api_restart():

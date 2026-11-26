@@ -105,11 +105,10 @@ TIME_SYNC_BROADCAST_INTERVAL_MS = 30000
 AUDIO_PACER_MAX_LAG_MS = 100
 
 # ---- Modes -----------------------------------------------------------------
-MODE_OFF   = 0
-MODE_MUSIC = 1
-MODE_MOVIE = 2
-MODE_COUNT = 3
-MODE_NAMES = ["off", "music", "movie"]
+MODE_MUSIC = 0
+MODE_MOVIE = 1
+MODE_COUNT = 2
+MODE_NAMES = ["music", "movie"]
 
 # ---- Audio buffer bounds ---------------------------------------------------
 AUDIO_BUFFER_MIN_MS = 20
@@ -135,11 +134,6 @@ DEFAULT_MASTER_MUTED  = False
 # EVDState.h g_modeSettings[] initializer. Field order matches ModeEncSettings:
 #   bitrate, complexity, vbr, vbrConstraint, signal, application, sampleRate, bufferMs
 MODE_ENCODE_DEFAULTS = [
-    {  # MODE_OFF
-        "bitrate": 96000, "complexity": 4, "vbr": True, "vbr_constraint": True,
-        "signal": OPUS_SIGNAL_MUSIC, "application": OPUS_APPLICATION_AUDIO,
-        "sample_rate": 48000, "buffer_ms": 120,
-    },
     {  # MODE_MUSIC
         "bitrate": 96000, "complexity": 4, "vbr": True, "vbr_constraint": True,
         "signal": OPUS_SIGNAL_MUSIC, "application": OPUS_APPLICATION_AUDIO,

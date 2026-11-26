@@ -228,7 +228,7 @@ def load_encoders_from_disk() -> None:
                     runtime.mode_settings[idx] = _clamp_encode_settings(
                         EncodeSettings.from_dict(modes[name])
                     )
-        play_mode = data.get("play_mode", "off")
+        play_mode = data.get("play_mode", "music")
         if play_mode in C.MODE_NAMES:
             runtime.playback_mode_idx = C.MODE_NAMES.index(play_mode)
     except (OSError, json.JSONDecodeError, KeyError):

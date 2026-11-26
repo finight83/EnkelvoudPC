@@ -53,10 +53,11 @@ def load_zones_from_disk() -> None:
         except (TypeError, ValueError):
             vol = 100
         muted = bool(entry.get("muted", False))
+        quiet = bool(entry.get("quiet", False))
         node_ips = [str(ip) for ip in entry.get("node_ips", [])
                     if isinstance(ip, str)]
         loaded.append(Zone(id=zid, name=name, volume=vol,
-                           muted=muted, node_ips=node_ips))
+                           muted=muted, quiet=quiet, node_ips=node_ips))
 
     has_main = any(z.id == C.MAIN_ZONE_ID for z in loaded)
     if not has_main:
@@ -76,7 +77,8 @@ def save_zones_to_disk() -> None:
             data = [
                 {
                     "id": z.id, "name": z.name, "volume": z.volume,
-                    "muted": z.muted, "node_ips": list(z.node_ips),
+                    "muted": z.muted, "quiet": z.quiet,
+                    "node_ips": list(z.node_ips),
                 }
                 for z in runtime.zones
             ]
@@ -273,6 +275,9 @@ def configure_zone(data: dict) -> Tuple[int, dict]:
 
             if "muted" in data and data["muted"] is not None:
                 z.muted = bool(data["muted"])
+
+            if "quiet" in data and data["quiet"] is not None:
+                z.quiet = bool(data["quiet"])
 
             target_ips = list(z.node_ips)
             new_vol = z.volume

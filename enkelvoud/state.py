@@ -79,6 +79,7 @@ class Zone:
     name: str
     volume: int = 100
     muted: bool = False
+    quiet: bool = False
     node_ips: List[str] = field(default_factory=list)
 
 
@@ -240,7 +241,7 @@ class Runtime:
         self.master_muted: bool = C.DEFAULT_MASTER_MUTED
         self.quiet_mode: bool = False
         self.latency_adjustment_ms: int = 0
-        self.audio_buffer_ms: int = C.MODE_ENCODE_DEFAULTS[C.MODE_OFF]["buffer_ms"]
+        self.audio_buffer_ms: int = C.MODE_ENCODE_DEFAULTS[C.MODE_MUSIC]["buffer_ms"]
         self.log_level: int = 3              # NEW: /api/log/level
         self.dlna_enabled: bool = False      # NEW: /api/dlna flag (stub)
         # Other Enkelvoud servers answering discovery on this LAN (see
@@ -255,7 +256,7 @@ class Runtime:
         # Alive peer servers from the beacon table (dashboard "Servers").
         self.peer_servers: List[dict] = []
 
-        self.playback_mode_idx: int = C.MODE_OFF
+        self.playback_mode_idx: int = C.MODE_MUSIC
 
         # ---- Encoder per-mode presets (RAM copy) ----------------------
         self.mode_settings: List[EncodeSettings] = [
@@ -328,7 +329,8 @@ class Runtime:
     # ---- Accessors for parity with C++ helpers ---------------------
 
     def playback_mode_cstr(self) -> str:
-        return C.MODE_NAMES[self.playback_mode_idx if 0 <= self.playback_mode_idx < 3 else 0]
+        return C.MODE_NAMES[self.playback_mode_idx
+                            if 0 <= self.playback_mode_idx < C.MODE_COUNT else 0]
 
     # ---- Subscriber table ops (EVDHelpers.h translations) ------------
 
@@ -426,7 +428,8 @@ class Runtime:
         with self.zones_lock:
             # Deep-copy so callers can't mutate the canonical list.
             return [Zone(id=z.id, name=z.name, volume=z.volume,
-                         muted=z.muted, node_ips=list(z.node_ips))
+                         muted=z.muted, quiet=z.quiet,
+                         node_ips=list(z.node_ips))
                     for z in self.zones]
 
     def assigned_node_ips(self) -> set:
@@ -435,6 +438,20 @@ class Runtime:
             ips = set()
             for z in self.zones:
                 ips.update(z.node_ips)
+            return ips
+
+    def quiet_node_ips(self) -> set:
+        """[quiet-stream] IPs in rooms with Quiet Mode on.
+
+        sender.quiet_sender streams only to these nodes and sender.sender
+        skips them, so a room hears either the band-passed encode or the
+        plain one, never a mix.
+        """
+        with self.zones_lock:
+            ips = set()
+            for z in self.zones:
+                if z.quiet:
+                    ips.update(z.node_ips)
             return ips
 
     # ---- Node perf ops (EVDHelpers.h) --------------------------------
