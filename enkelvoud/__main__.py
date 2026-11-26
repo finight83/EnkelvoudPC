@@ -270,6 +270,11 @@ def main(argv=None) -> int:
     def _shutdown(_signum=None, _frame=None):
         log_info("Shutting down")
         stop_event.set()
+        # [servers-decide] If this is the leader, tell its nodes to move NOW:
+        # the peer election promotes the next server within a few seconds, but
+        # without this notice each node sits on the 60 s stale-contact path.
+        if getattr(runtime, "is_leader", False):
+            _notify_standby()
         try:
             peers_mod.peers.stop()
         except Exception:

@@ -836,6 +836,10 @@ def create_app(web_dir: str, allow_restart: bool = False,
         status_code, body = recorder.stop(data.get("recId"))
         return _json(body, status_code)
 
+    @app.route("/api/rec/status", methods=["GET"])
+    def api_rec_status():
+        return _json(recorder.status())
+
     @app.route("/api/player/rec_ack", methods=["POST"])
     def api_player_rec_ack():
         data = _try_parse_json()

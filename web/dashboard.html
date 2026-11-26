@@ -544,7 +544,7 @@
           </button>
           <button type="button" class="nav-btn nav-btn-primary" id="analyzeBtn" title="Record up to 10 min - click Finish Now to end early">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
-            Analyze
+            <span id="analyzeLabel">Analyze</span>
           </button>
         </nav>
 
@@ -2475,9 +2475,10 @@
       if (!m) return;
       recRenderNodeList();
       var st = $('recStatus');
-      if (st) st.textContent = recSessionId ? 'recording…' : '';
+      if (st && !recTimerId) st.textContent = '';
       m.classList.add('open');
       m.setAttribute('aria-hidden', 'false');
+      recSyncStatus();
     };
 
     window.closeRecModal = function() {
@@ -2501,6 +2502,66 @@
       if (t) t.disabled = !running;
     }
 
+    // [master-rec-timer] Live elapsed time for the master recording, shown in
+    // the modal's status line and in the nav button (visible even when the
+    // modal is closed). /api/rec/status lets it resume after a page reload.
+    var recTimerId = null, recStartedAt = 0, recSelLabel = '';
+
+    function recFmt(ms) {
+      var s = Math.max(0, Math.floor(ms / 1000));
+      var m = Math.floor(s / 60), ss = s % 60;
+      return (m < 10 ? '0' : '') + m + ':' + (ss < 10 ? '0' : '') + ss;
+    }
+
+    function recPaint() {
+      var elapsed = recFmt(Date.now() - recStartedAt);
+      var lbl = $('analyzeLabel');
+      if (lbl) { lbl.textContent = 'REC ' + elapsed; lbl.style.color = '#ff6b6b'; }
+      var st = $('recStatus');
+      if (st) st.textContent = 'recording ' + elapsed + (recSelLabel ? ' — ' + recSelLabel : '');
+    }
+
+    function recStartTimer(label, elapsedMs) {
+      recSelLabel = label || '';
+      recStartedAt = Date.now() - (elapsedMs || 0);
+      if (recTimerId) clearInterval(recTimerId);
+      recPaint();
+      recTimerId = setInterval(recPaint, 1000);
+      var b = $('analyzeBtn');
+      if (b) b.title = 'Master recording in progress - press Stop & build report to end';
+    }
+
+    function recStopTimer() {
+      if (recTimerId) clearInterval(recTimerId);
+      recTimerId = null;
+      recSelLabel = '';
+      var lbl = $('analyzeLabel');
+      if (lbl) { lbl.textContent = 'Analyze'; lbl.style.color = ''; }
+      var b = $('analyzeBtn');
+      if (b) b.title = 'Record up to 10 min - click Finish Now to end early';
+      var st = $('recStatus');
+      if (st && recSessionId === null) st.textContent = '';
+    }
+
+    async function recSyncStatus() {
+      var r = null;
+      try { r = await api('/api/rec/status', 'GET', undefined, { silent: true }); }
+      catch (_) { return; }
+      if (!r || !r.ok) return;
+      if (r.active) {
+        if (!recTimerId) {
+          recSessionId = r.recId || recSessionId;
+          setRecButtons(true);
+          recStartTimer('server=' + (r.server ? 'yes' : 'no') +
+                        ', nodes=' + ((r.nodes || []).length), r.durationMs || 0);
+        }
+      } else if (recTimerId) {
+        recStopTimer();
+        setRecButtons(false);
+        recSessionId = null;
+      }
+    }
+
     window.recStart = async function() {
       var ips = recSelectedIps();
       var withServer = !!($('recServerChk') && $('recServerChk').checked);
@@ -2511,7 +2572,7 @@
       if (!r || !r.ok) { if (st) st.textContent = 'could not start: ' + ((r && r.error) || 'error'); return; }
       recSessionId = id;
       setRecButtons(true);
-      if (st) st.textContent = 'recording — server=' + (withServer ? 'yes' : 'no') + ', nodes=' + ips.length;
+      recStartTimer('server=' + (withServer ? 'yes' : 'no') + ', nodes=' + ips.length, 0);
     };
 
     function buildMasterReport(data) {
@@ -2563,9 +2624,16 @@
       var st = $('recStatus');
       if (st) st.textContent = 'stopping and collecting node reports…';
       var r = await api('/api/rec/stop', 'POST', { recId: recSessionId });
+      if (!r || !r.ok) {
+        // Keep the session id and the timer: the recording may still be
+        // running server-side, so Stop can be retried.
+        setRecButtons(true);
+        if (st) st.textContent = 'stop failed: ' + ((r && r.error) || 'error');
+        return;
+      }
       recSessionId = null;
       setRecButtons(false);
-      if (!r || !r.ok) { if (st) st.textContent = 'stop failed: ' + ((r && r.error) || 'error'); return; }
+      recStopTimer();
       closeRecModal();
       var overlay = $('recordResultOverlay');
       var ta = $('recordResultText');
@@ -2588,6 +2656,10 @@
       });
     })();
 
+    // Resume the master-recording timer if a session is already running
+    // (e.g. the page was reloaded while recording).
+    recSyncStatus();
+
     // ====================================================================
     //  Firmware fetch + polling
     // ====================================================================
@@ -2599,6 +2671,9 @@
     async function pollLoop() {
       // Skip polling during a diagnostic recording.
       if (!recording) await refreshStatus();
+      // Keep the master-recording timer honest if another tab started/stopped
+      // a session, and recover it after a reload.
+      if (!recording) recSyncStatus();
       setTimeout(pollLoop, 4000);
     }
     setTimeout(pollLoop, 150);

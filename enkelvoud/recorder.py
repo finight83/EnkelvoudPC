@@ -276,3 +276,26 @@ def stop(rec_id: str) -> Tuple[int, dict]:
     log_info("Recorder: session %s stopped (%d node report(s))",
              rec_id, len(nodes))
     return 200, payload
+
+
+def status() -> dict:
+    """Current session state, for the dashboard's recording timer.
+
+    Cheap enough to poll: the dashboard uses durationMs to resume its elapsed
+    timer after a page reload (the browser cannot map the server's monotonic
+    started_ms directly, but it can anchor on "how long has it been running").
+    """
+    with _lock:
+        if not _sessions:
+            return {"ok": True, "active": False}
+        rec_id, session = next(iter(_sessions.items()))
+    return {
+        "ok": True,
+        "active": True,
+        "recId": rec_id,
+        "startedMs": session.started_ms,
+        "durationMs": now_ms() - session.started_ms,
+        "nodes": list(session.node_ips),
+        "server": bool(session.with_server),
+        "startedWall": session.started_wall,
+    }
