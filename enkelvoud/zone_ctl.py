@@ -112,6 +112,7 @@ def broadcast_node_config() -> None:
                 zvol = z.volume
                 zmute = z.muted
                 break
+        zmute = zmute or runtime.all_muted
         ctrl.send_host_audio_sync_broadcast(
             s.ip,
             s.negotiated_audio_protocol_version,

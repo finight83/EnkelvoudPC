@@ -44,7 +44,9 @@ same HTTP API, and serves the same dashboard on port 80.
   is no over-the-air path for the server itself. Player nodes *are* updated
   from the Update tab (see "Firmware updates").
 - **Master volume/mute** — controlled by Windows, not the server.
-- **Per-room Quiet** — implemented as a second Opus stream: rooms with Quiet on
+- **Quiet Mode (global)** — one toggle in the Zones action bar puts every
+  assigned room on the filtered stream (band-pass 400 Hz-9.5 kHz + limiter).
+  It is implemented as a second Opus stream: rooms with Quiet on
   get the band-passed encode (400 Hz–9.5 kHz + peak limiter, ported from
   `EVDAudio.h`), every other room gets the plain one. Costs a second encoder
   while at least one room has it on.
@@ -253,7 +255,8 @@ above the Opus Nyquist are skipped, so the 16 kHz slider does nothing at the
 
 ## Persistent state
 
-- `data/zones.json` — zone definitions (volume, mute and per-room quiet).
+- `data/zones.json` — zone definitions (volume, mute and per-room quiet; the
+  action bar's Quiet/Mute-all toggles are runtime flags, not persisted).
 - `data/encoders.json` — per-mode encoder presets (`music`, `movie`; music is
   the default), plus the currently selected mode.
 - `data/ota_spool/` — uploaded player firmware images (`node_<version>.bin`).

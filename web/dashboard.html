@@ -381,6 +381,9 @@
     /* The servers card used to be inset 30px further than the room cards. */
     .zones-controls { padding-left: 0; padding-right: 0; }
     .zone-action-bar .btn-glass { display: inline-flex; align-items: center; gap: 8px; }
+    .zone-action-bar .btn-glass.active {
+      background: rgba(255,255,255,0.16); border-color: var(--hair-strong); color: #fff;
+    }
     .zone-action-bar .btn-glass svg { width: 17px; height: 17px; stroke: currentColor;
       fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
     /* the room name is a heading, not a form field */
@@ -568,6 +571,14 @@
         <button type="button" class="btn-glass" id="eqBtn" title="10-band equalizer">
           <svg viewBox="0 0 24 24"><path d="M6 20V10M12 20V4M18 20V13"/><path d="M4 10h4M10 4h4M16 13h4"/></svg>
           EQ
+        </button>
+        <button type="button" class="btn-glass" id="quietAllBtn"
+                title="Quiet Mode for every room: band-passed, quieter stream">
+          Quiet
+        </button>
+        <button type="button" class="btn-glass" id="muteAllBtn"
+                title="Mute every room (per-room mute is kept)">
+          Mute all
         </button>
       </div>
       <div class="zone-container" id="zonesContainer">
@@ -1128,6 +1139,11 @@
       if (s.zones) {
         var k = JSON.stringify(s.zones);
         if (k !== zonesKey) { zonesKey = k; zonesData = s.zones; renderZones(); }
+      allQuiet = !!s.quietMode;
+      allMuted = !!s.allMuted;
+      var qa = $('quietAllBtn'), ma = $('muteAllBtn');
+      if (qa) qa.classList.toggle('active', allQuiet);
+      if (ma) ma.classList.toggle('active', allMuted);
       }
       if (s.players) {
         var pk = JSON.stringify(s.players);
@@ -1178,13 +1194,6 @@
                         'style="padding:5px 12px;font-size:0.78rem;" ' +
                         'onclick="toggleZoneMute(\'' + zone.id + '\')">' +
                   (zone.muted ? 'Unmute' : 'Mute Room') +
-                '</button>' +
-                '<button type="button" class="btn-glass" ' +
-                        'style="padding:5px 12px;font-size:0.78rem;' +
-                        (zone.quiet ? 'border-color:var(--accent-primary);color:var(--accent-primary);' : '') + '" ' +
-                        'title="Quiet Mode: reduces high-frequency energy in this room" ' +
-                        'onclick="toggleZoneQuiet(\'' + zone.id + '\')">' +
-                  (zone.quiet ? 'Quiet: On' : 'Quiet') +
                 '</button>' +
               '</div>' +
             '</div>' +
@@ -1360,12 +1369,18 @@
     window.updateZoneVolume = async function(zoneId, volume) {
       await api('/api/zones/config', 'POST', { zoneId: zoneId, volume: parseInt(volume, 10) });
     };
-    window.toggleZoneQuiet = async function(zoneId) {
-      var z = zonesData.find(function(x){ return x.id === zoneId; });
-      if (!z) return;
-      await api('/api/zones/config', 'POST', { zoneId: zoneId, quiet: !z.quiet });
+    var allQuiet = false, allMuted = false;
+    window.toggleQuietAll = async function() {
+      var r = await api('/api/all/quiet', 'POST', { enabled: !allQuiet });
+      if (r && r.ok) allQuiet = !!r.quiet;
       refreshStatus();
     };
+    window.toggleMuteAll = async function() {
+      var r = await api('/api/all/mute', 'POST', { muted: !allMuted });
+      if (r && r.ok) allMuted = !!r.muted;
+      refreshStatus();
+    };
+
     window.toggleZoneMute = async function(zoneId) {
       var z = zonesData.find(function(x){ return x.id === zoneId; });
       if (!z) return;

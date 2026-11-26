@@ -240,6 +240,9 @@ class Runtime:
         self.server_name: str = C.DEFAULT_SERVER_NAME
         self.master_volume: int = C.DEFAULT_MASTER_VOLUME
         self.master_muted: bool = C.DEFAULT_MASTER_MUTED
+        # [all-muted] Global mute from the zones action bar. ORed into the
+        # zoneMuted value sent to nodes, so per-room mute flags survive it.
+        self.all_muted: bool = False
         self.quiet_mode: bool = False
         # [eq] Master 10-band equaliser, applied before Opus encoding.
         self.eq_enabled: bool = False
@@ -454,7 +457,11 @@ class Runtime:
         with self.zones_lock:
             ips = set()
             for z in self.zones:
-                if z.quiet:
+                # [all-quiet] The action-bar Quiet button sets quiet_mode, which
+                # puts every assigned room on the filtered stream. Per-room flags
+                # are kept (they still work through /api/zones/config) but the UI
+                # no longer exposes them.
+                if self.quiet_mode or z.quiet:
                     ips.update(z.node_ips)
             return ips
 

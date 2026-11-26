@@ -141,6 +141,7 @@ def _build_state_response() -> dict:
         "leaderId": peers_snap["leaderId"],
         "servers": peers_snap["servers"],
         "quietMode": runtime.quiet_mode,
+        "allMuted": runtime.all_muted,
         "cpuPct": cpu["proc"],
         "sysCpuPct": cpu["sys"],
         "heapUsedPct": heap_used_pct,
@@ -691,6 +692,38 @@ def create_app(web_dir: str, allow_restart: bool = False,
             return _json({"ok": False, "error": "bad json"}, 400)
         status, body = zone_ctl.remove_node(data)
         return _json(body, status)
+
+    # ---- /api/all/mute -------------------------------------------------
+    # "Mute every room" without overwriting per-room mute flags, so unmuting
+    # restores what each room had. The flag is ORed into zoneMuted.
+    @app.route("/api/all/mute", methods=["POST"])
+    def api_all_mute():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict) or "muted" not in data:
+            return _json({"ok": False, "error": "muted required"}, 400)
+        runtime.all_muted = bool(data["muted"])
+        for z in runtime.snapshot_zones():
+            for ip in z.node_ips:
+                ctrl.send_zone_config_to_ip(ip, z.volume,
+                                            z.muted or runtime.all_muted)
+        zone_ctl.broadcast_node_config()
+        return _json({"ok": True, "muted": runtime.all_muted})
+
+    # ---- /api/all/quiet ------------------------------------------------
+    # Global Quiet Mode: every assigned room gets the band-passed stream.
+    @app.route("/api/all/quiet", methods=["POST"])
+    def api_all_quiet():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict) or "enabled" not in data:
+            return _json({"ok": False, "error": "enabled required"}, 400)
+        runtime.quiet_mode = bool(data["enabled"])
+        return _json({"ok": True, "quiet": runtime.quiet_mode})
 
     # ---- /api/zone/forget-node (PC only) -------------------------------
     @app.route("/api/zone/forget-node", methods=["POST"])
