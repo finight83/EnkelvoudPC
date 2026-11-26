@@ -94,6 +94,9 @@ class PeerRegistry:
         self._data_path: Optional[str] = None
         self._on_role_change: Optional[Callable[[str], None]] = None
         self._started = time.monotonic()
+        # While non-zero, the leader re-announces itself to the fleet (~4 s
+        # after taking over) so a lost UDP packet cannot strand a node.
+        self._ready_until = 0.0
 
     # ---- lifecycle ------------------------------------------------------
 
@@ -155,6 +158,42 @@ class PeerRegistry:
         peers = [dict(p, self=False) for p in self._alive_peers(now)]
         return elect(peers + [me])
 
+    def peer_node_map(self) -> Dict[str, dict]:
+        """Nodes advertised by peers (the leader's fleet view).
+
+        A standby does not receive player registrations, so without this its
+        dashboard shows the whole fleet as offline. The leader broadcasts its
+        node list in the beacon; this merges them.
+        """
+        out: Dict[str, dict] = {}
+        with self.lock:
+            for p in self.peers.values():
+                for n in p.get("nodes", []):
+                    out.setdefault(n["ip"], n)
+        return out
+
+    def _notify_server_ready(self) -> None:
+        """Tell the previous leader's nodes that THIS server is next.
+
+        The nodes accept 'server_ready' from an unknown LAN IP only after their
+        old server has gone quiet, so a spoof cannot hijack a streaming node;
+        see EnkelvoudESPPlayer/EVDPNet.h. This is what makes a failover instant
+        instead of waiting for the node's 60 s stale-contact re-discovery.
+        """
+        nodes = self.peer_node_map()
+        if not nodes:
+            return
+        from . import ctrl as ctrl_mod
+        sent = 0
+        for ip in nodes:
+            try:
+                ctrl_mod.send_ctrl_to_subscriber(ip, '{"type":"server_ready"}')
+                sent += 1
+            except Exception:
+                pass
+        if sent:
+            log_info("Peer election: told %d node(s) to connect here", sent)
+
     def _evaluate(self) -> None:
         now = now_ms()
         with self.lock:
@@ -177,6 +216,11 @@ class PeerRegistry:
         if new_role == "leader":
             log_info("Peer election: leader now %s (this server took over; "
                      "%d peer(s) alive)", self.id, len(alive))
+            # A failover is instant only if the nodes are told: the next
+            # leader announces itself to the fleet it learned from the old
+            # leader's beacons (repeated for ~4 s by _run()).
+            self._ready_until = time.monotonic() + 4.0
+            self._notify_server_ready()
         else:
             log_warn("Peer election: this server is now STANDBY - %s (%s) "
                      "outranks it (priority %s vs %d); nodes will move there",
@@ -281,8 +325,23 @@ class PeerRegistry:
                 last_beacon = now
                 self._send_beacon()
                 self._evaluate()
+                # Repeat the takeover announcement for a few seconds so a
+                # lost UDP packet does not strand a node.
+                if self.role == "leader" and self._ready_until > 0:
+                    if time.monotonic() < self._ready_until:
+                        self._notify_server_ready()
+                    else:
+                        self._ready_until = 0.0
 
     def _send_beacon(self) -> None:
+        # [node-sharing] The leader owns the fleet; broadcast the node list so
+        # a standby can display it and, on failure, guide the nodes over.
+        nodes = []
+        try:
+            for p in runtime.snapshot_players(now_ms())[:16]:
+                nodes.append({"ip": p.ip, "name": p.name, "ver": p.version})
+        except Exception:
+            nodes = []
         msg = {
             "e": C.PEER_PROTOCOL,
             "id": self.id,
@@ -292,6 +351,7 @@ class PeerRegistry:
             "httpPort": self._http_port,
             "uptimeMs": int((time.monotonic() - self._started) * 1000),
             "version": C.VERSION,
+            "nodes": nodes,
         }
         data = json.dumps(msg).encode("utf-8")
         targets = _broadcast_targets()
@@ -323,6 +383,21 @@ class PeerRegistry:
         name = msg.get("name")
         if not isinstance(name, str):
             name = pid
+        # [node-sharing] Sanitize the peer's fleet list (the leader's beacon).
+        raw_nodes = msg.get("nodes")
+        nodes = []
+        if isinstance(raw_nodes, list):
+            for n in raw_nodes[:16]:
+                if not isinstance(n, dict):
+                    continue
+                nip = n.get("ip")
+                if not isinstance(nip, str) or not nip:
+                    continue
+                nodes.append({
+                    "ip": nip[:15],
+                    "name": str(n.get("name", ""))[:32],
+                    "ver": str(n.get("ver", ""))[:16],
+                })
         peer = {
             "id": pid,
             "name": name[:32],
@@ -332,6 +407,7 @@ class PeerRegistry:
             "httpPort": http_port,
             "version": str(msg.get("version", ""))[:16],
             "uptimeMs": uptime,
+            "nodes": nodes,
             "lastSeenMs": now_ms(),
         }
         with self.lock:

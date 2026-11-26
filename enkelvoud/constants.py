@@ -21,9 +21,10 @@ Anything marked INFERRED is a PC-side design choice, not taken from your files.
 # The PC server reports a plain "version": there is no microcontroller
 # firmware here. The string is still sent in the UDP discovery reply, where
 # the ESP32 player nodes expect the same field layout as the ESP32 server.
-# 3.9.2.2: master-recording status endpoint + dashboard timer; a graceful
-#          stop now tells the nodes to move to the next server immediately.
-VERSION = "3.9.2.2"
+# 3.9.3.0: the leader shares its node list with standbys (beacon "nodes"), a
+#          promoted server announces itself to them (server_ready), and a
+#          standby's dashboard shows the shared fleet instead of "Offline".
+VERSION = "3.9.3.0"
 
 # ---- Audio wire protocol ---------------------------------------------------
 # EnkelvoudServer.ino

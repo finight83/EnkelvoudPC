@@ -105,6 +105,11 @@ def _build_state_response() -> dict:
         heap_total_bytes = 0
         heap_max_alloc = 0
 
+    # [node-sharing] Nodes registered with the LEADER of a multi-server LAN
+    # are not in this server's player table. Use the leader's shared list so a
+    # standby's dashboard shows the fleet instead of every node as offline.
+    shared_nodes = peers_mod.peers.peer_node_map()
+
     zone_json = []
     for z in zones:
         node_entries = []
@@ -118,11 +123,12 @@ def _build_state_response() -> dict:
                     "known": True,
                 })
             else:
+                shared = shared_nodes.get(ip)
                 node_entries.append({
-                    "name": ip,
+                    "name": (shared.get("name") or ip) if shared else ip,
                     "ip": ip,
-                    "version": "",
-                    "known": False,
+                    "version": (shared.get("ver") or "") if shared else "",
+                    "known": bool(shared),
                 })
         zone_json.append({
             "id": z.id, "name": z.name, "volume": z.volume,
