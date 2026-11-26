@@ -36,6 +36,17 @@ class ElectTest(unittest.TestCase):
         peers = [{"id": "a", "priority": 1}]
         self.assertEqual(elect(peers + [me])["id"], "a")
 
+    def test_longer_running_leader_keeps_leadership_on_tie(self):
+        # Regression: the ESP's persisted priority could tie the PC's at 1,
+        # and the id tie-break ("esp-" < "pc-") then handed the fleet to a
+        # newcomer that streamed nothing. The incumbent (higher uptime) wins.
+        me = {"id": "pc-1", "priority": 1, "uptimeMs": 500000}
+        peers = [{"id": "esp-1", "priority": 1, "uptimeMs": 3000}]
+        self.assertEqual(elect(peers + [me])["id"], "pc-1")
+        # Equal uptime still falls back to the id.
+        peers[0]["uptimeMs"] = 500000
+        self.assertEqual(elect(peers + [me])["id"], "esp-1")
+
     def test_invalid_priority_ranks_worst(self):
         me = {"id": "pc-1", "priority": 1}
         peers = [{"id": "x", "priority": None}]

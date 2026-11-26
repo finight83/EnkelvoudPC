@@ -49,16 +49,25 @@ def _server_id() -> str:
 
 
 def elect(candidates: List[dict]) -> dict:
-    """Pure election: the alive server with the lowest (priority, id) wins.
+    """Pure election: the alive server with the lowest (priority, -uptime, id).
 
     Separate from the socket code so it can be unit-tested: the caller passes
     the alive peers plus itself. A missing/odd priority ranks as worst.
+
+    Ties are broken in favour of the server that has been up the longest.
+    Without that, two servers at the SAME priority (e.g. the ESP's persisted
+    priority left at 1 after a takeover test) were decided purely by machine
+    id, and the newcomer could displace a healthy running leader -- which then
+    stepped down and stopped streaming.
     """
     def key(p: dict):
         prio = p.get("priority")
         if not isinstance(prio, int) or prio < 1:
             prio = C.MAX_SERVER_PRIORITY
-        return (prio, str(p.get("id", "")))
+        up = p.get("uptimeMs")
+        if not isinstance(up, int) or up < 0:
+            up = 0
+        return (prio, -up, str(p.get("id", "")))
 
     return min(candidates, key=key)
 
@@ -130,6 +139,9 @@ class PeerRegistry:
     def is_leader(self) -> bool:
         return self.role == "leader"
 
+    def _uptime_ms(self) -> int:
+        return int((time.monotonic() - self._started) * 1000)
+
     def _alive_peers(self, now: int) -> List[dict]:
         with self.lock:
             return [p for p in self.peers.values()
@@ -138,7 +150,8 @@ class PeerRegistry:
     def leader_descriptor(self) -> dict:
         now = now_ms()
         me = {"id": self.id, "name": runtime.server_name,
-              "ip": get_local_ip(), "priority": self.priority, "self": True}
+              "ip": get_local_ip(), "priority": self.priority,
+              "uptimeMs": self._uptime_ms(), "self": True}
         peers = [dict(p, self=False) for p in self._alive_peers(now)]
         return elect(peers + [me])
 
@@ -151,7 +164,8 @@ class PeerRegistry:
                 del self.peers[pid]
             alive = [p for p in self.peers.values()
                      if now - p["lastSeenMs"] <= C.PEER_DEAD_MS]
-        me = {"id": self.id, "priority": self.priority}
+        me = {"id": self.id, "priority": self.priority,
+              "uptimeMs": self._uptime_ms()}
         best = elect(alive + [me])
         new_role = "leader" if best["id"] == self.id else "standby"
         if new_role == self.role:
@@ -342,6 +356,7 @@ class PeerRegistry:
             "ip": get_local_ip(), "priority": self.priority,
             "role": self.role, "self": True, "alive": True,
             "version": C.VERSION, "httpPort": self._http_port,
+            "uptimeMs": self._uptime_ms(),
         }
         servers = peers + [me]
         servers.sort(key=lambda s: (s["priority"], s["id"]))
