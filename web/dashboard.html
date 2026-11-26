@@ -512,6 +512,36 @@
     </div>
   </div>
 
+  <!-- ===================== Master record modal ===================== -->
+  <div id="recModal" class="ota-modal" aria-hidden="true">
+    <div class="ota-modal-backdrop" onclick="closeRecModal()"></div>
+    <div class="ota-modal-panel" role="dialog" aria-modal="true" aria-label="Record diagnostics">
+      <div class="ota-modal-header">
+        <strong style="font-size:1rem;">Record Diagnostics</strong>
+        <button type="button" class="ota-close" onclick="closeRecModal()" aria-label="Close">&times;</button>
+      </div>
+      <div class="ota-modal-body">
+        <p class="muted" style="font-size:.82rem;margin-bottom:10px;">
+          Pick what to record. Nodes buffer locally (PSRAM) and send their report when you press Stop.
+        </p>
+        <label style="display:flex;align-items:center;gap:10px;padding:6px 0;">
+          <input type="checkbox" id="recServerChk" checked style="width:18px;height:18px;accent-color:#8e2de2;">
+          <span style="font-weight:600;">This server (PC)</span>
+        </label>
+        <div id="recNodeList" style="margin-top:6px;"></div>
+        <div class="log-controls" style="margin-top:12px;align-items:center;">
+          <button type="button" class="btn-glass" id="recSelectAll" style="padding:4px 10px;font-size:0.75rem;">Select all</button>
+          <span class="muted" id="recSelState" style="font-size:0.78rem;">0 nodes</span>
+        </div>
+        <div id="recStatus" class="muted" style="margin-top:10px;font-size:0.8rem;"></div>
+      </div>
+      <div class="ota-modal-footer">
+        <button type="button" class="btn-glass" id="recStartBtn">Start</button>
+        <button type="button" class="btn-primary" id="recStopBtn" disabled>Stop &amp; build report</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== Recording modals ===================== -->
   <div id="recordProgressOverlay" class="rec-overlay" aria-hidden="true">
     <div class="rec-panel">
@@ -2053,11 +2083,166 @@
     })();
 
     // ====================================================================
-    //  Analyze button
+    //  Master recording: one session across the PC and selected nodes
     // ====================================================================
+    var recSessionId = null;
+
+    function recSelectedIps() {
+      var out = [];
+      Array.prototype.forEach.call(document.querySelectorAll('#recNodeList .recNodeChk'), function(b){
+        if (b.checked) out.push(b.value);
+      });
+      return out;
+    }
+
+    function recRefreshSel() {
+      var n = recSelectedIps().length;
+      var st = $('recSelState');
+      if (st) st.textContent = n + (n === 1 ? ' node' : ' nodes');
+      var all = $('recSelectAll');
+      var boxes = document.querySelectorAll('#recNodeList .recNodeChk');
+      if (all && boxes.length) all.textContent = (n === boxes.length && n > 0) ? 'Clear all' : 'Select all';
+    }
+
+    function recRenderNodeList() {
+      var list = $('recNodeList');
+      if (!list) return;
+      var nodes = playersData || [];
+      if (!nodes.length) {
+        list.innerHTML = '<p class="muted">No player nodes registered.</p>';
+        recRefreshSel();
+        return;
+      }
+      var html = '';
+      nodes.forEach(function(p){
+        var name = String(p.name || p.ip).replace(/[<>&"]/g, '');
+        html +=
+          '<label style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+            '<input type="checkbox" class="recNodeChk" value="' + p.ip + '" checked style="width:18px;height:18px;accent-color:#8e2de2;">' +
+            '<span style="font-weight:600;flex:1 1 auto;">' + name + '</span>' +
+            '<span class="muted" style="font-family:ui-monospace,monospace;font-size:0.78rem;">' + p.ip + '</span>' +
+          '</label>';
+      });
+      list.innerHTML = html;
+      recRefreshSel();
+    }
+
+    window.openRecModal = function() {
+      var m = $('recModal');
+      if (!m) return;
+      recRenderNodeList();
+      var st = $('recStatus');
+      if (st) st.textContent = recSessionId ? 'recording…' : '';
+      m.classList.add('open');
+      m.setAttribute('aria-hidden', 'false');
+    };
+
+    window.closeRecModal = function() {
+      var m = $('recModal');
+      if (!m) return;
+      m.classList.remove('open');
+      m.setAttribute('aria-hidden', 'true');
+    };
+
+    window.recToggleAll = function() {
+      var boxes = document.querySelectorAll('#recNodeList .recNodeChk');
+      var all = boxes.length > 0;
+      Array.prototype.forEach.call(boxes, function(b){ if (!b.checked) all = false; });
+      Array.prototype.forEach.call(boxes, function(b){ b.checked = !all; });
+      recRefreshSel();
+    };
+
+    function setRecButtons(running) {
+      var s = $('recStartBtn'), t = $('recStopBtn');
+      if (s) s.disabled = running;
+      if (t) t.disabled = !running;
+    }
+
+    window.recStart = async function() {
+      var ips = recSelectedIps();
+      var withServer = !!($('recServerChk') && $('recServerChk').checked);
+      if (!ips.length && !withServer) { toast('Tick the server or a node first', 'err'); return; }
+      var id = 'r' + Date.now();
+      var st = $('recStatus');
+      var r = await api('/api/rec/start', 'POST', { recId: id, nodes: ips, server: withServer });
+      if (!r || !r.ok) { if (st) st.textContent = 'could not start: ' + ((r && r.error) || 'error'); return; }
+      recSessionId = id;
+      setRecButtons(true);
+      if (st) st.textContent = 'recording — server=' + (withServer ? 'yes' : 'no') + ', nodes=' + ips.length;
+    };
+
+    function buildMasterReport(data) {
+      var L = [];
+      var durS = (data.durationMs || 0) / 1000;
+      L.push('=== Enkelvoud Master Recording ===');
+      L.push('Started:  ' + (data.startedWall || '?'));
+      L.push('Duration: ' + durS.toFixed(1) + 's');
+      L.push('RecId:    ' + (data.recId || '?'));
+      L.push('');
+      var srv = data.server;
+      if (srv) {
+        var s0 = (srv.samples && srv.samples[0]) || {};
+        L.push('=== Server (PC) ===');
+        L.push('Mode: ' + (s0.mode || '?') + '   Buffer: ' + (s0.bufferMs != null ? s0.bufferMs + ' ms' : '?') +
+               '   Clients: ' + (s0.clients != null ? s0.clients : '?'));
+        L.push('Samples: ' + ((srv.samples || []).length) + ' at ~1 Hz');
+        L.push('');
+        L.push('t     | wall     | cpu  | sys  | ram  | qd/qq | lat   | rebuf');
+        L.push('-'.repeat(64));
+        (srv.samples || []).forEach(function(s){
+          L.push(String(s.t).padStart(5) + ' | ' + String(s.wall || '').padEnd(8) + ' | ' +
+                 String(s.cpuPct != null ? s.cpuPct : '-').padStart(4) + ' | ' +
+                 String(s.sysCpuPct != null ? s.sysCpuPct : '-').padStart(4) + ' | ' +
+                 String(s.ramPct != null ? s.ramPct : '-').padStart(4) + ' | ' +
+                 String((s.qd != null ? s.qd : '?') + '/' + (s.qq != null ? s.qq : '?')).padStart(5) + ' | ' +
+                 String(s.latencyMs != null ? s.latencyMs : '-').padStart(5) + ' | ' +
+                 String(s.rebuffers != null ? s.rebuffers : '-').padStart(5));
+        });
+        var logs = srv.logs || [];
+        L.push('');
+        L.push('=== Server Log (' + logs.length + ' lines) ===');
+        if (!logs.length) L.push('(no log lines)');
+        logs.forEach(function(l){ L.push('[' + String(l.t).padStart(6) + 's] ' + l.level + ' | ' + l.text); });
+        L.push('');
+      }
+      (data.nodes || []).forEach(function(n){
+        L.push('=== Node ' + (n.name || n.ip) + ' (' + n.ip + ') — ' + (n.source === 'node' ? 'node report' : 'server poll fallback') + ' ===');
+        L.push('Lines: ' + n.count + (n.dropped ? '  (dropped ' + n.dropped + ')' : ''));
+        if (!n.lines || !n.lines.length) L.push('(no lines captured)');
+        (n.lines || []).forEach(function(line){ L.push(line); });
+        L.push('');
+      });
+      return L.join('\n');
+    }
+
+    window.recStop = async function() {
+      if (!recSessionId) return;
+      var st = $('recStatus');
+      if (st) st.textContent = 'stopping and collecting node reports…';
+      var r = await api('/api/rec/stop', 'POST', { recId: recSessionId });
+      recSessionId = null;
+      setRecButtons(false);
+      if (!r || !r.ok) { if (st) st.textContent = 'stop failed: ' + ((r && r.error) || 'error'); return; }
+      closeRecModal();
+      var overlay = $('recordResultOverlay');
+      var ta = $('recordResultText');
+      if (ta) ta.value = buildMasterReport(r);
+      if (overlay) { overlay.classList.add('open'); overlay.setAttribute('aria-hidden', 'false'); }
+    };
+
     (function(){
       var btn = $('analyzeBtn');
-      if (btn) btn.addEventListener('click', startRecording);
+      if (btn) btn.addEventListener('click', window.openRecModal);
+      var start = $('recStartBtn');
+      if (start) start.addEventListener('click', window.recStart);
+      var stop = $('recStopBtn');
+      if (stop) stop.addEventListener('click', window.recStop);
+      var all = $('recSelectAll');
+      if (all) all.addEventListener('click', window.recToggleAll);
+      var list = $('recNodeList');
+      if (list) list.addEventListener('change', function(e){
+        if (e.target && e.target.classList && e.target.classList.contains('recNodeChk')) recRefreshSel();
+      });
     })();
 
     // ====================================================================

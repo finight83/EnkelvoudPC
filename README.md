@@ -225,6 +225,22 @@ completed/failed), `POST /api/ota/apply`
 (multipart), `POST /api/ota/delete`. There is no server self-flash: a PC app is
 updated by replacing its files.
 
+## Master recording (server + nodes)
+
+**Analyze** in the top bar opens a picker: tick *This server* and/or any player
+nodes, press **Start**, and later **Stop & build report**. The server samples
+its own CPU/RAM/queues/logs at 1 Hz and merges one report per node into a
+single text report (copy or download).
+
+Node side: `rec_start` / `rec_stop` ctrl datagrams (UDP :4203, with a `recId`
+the node echoes back). Patched firmware acknowledges with
+`POST /api/player/rec_ack` and serves `GET /api/rec_report?recId=...`; the
+capture lives in the node's otherwise-unused PSRAM (12000 × 160 B ≈ 1.9 MB),
+is written from the existing log path (normal logging unchanged) and is
+streamed back in ~1 KB chunks. Nodes without that firmware never ack, so the
+server falls back to polling their `/api/logs` ring at 1 Hz — 50-line window,
+so keep the node log level at 1–2 for those.
+
 ## Persistent state
 
 - `data/zones.json` — zone definitions (volume, mute and per-room quiet).

@@ -245,8 +245,7 @@ def send_host_audio_sync_broadcast(
 #                          untouched and only the zone state changes)
 # ---------------------------------------------------------------------------
 
-def send_zone_config_to_ip(ip: str, zvol: int, zmute: bool) -> bool:
-    # Look up the node's last-known compat state.
+def send_zone_config_to_ip(ip: str, zvol: int, zmute: bool) -> bool:    # Look up the node's last-known compat state.
     have_compat = False
     compatible = False
     negotiated_ver = 0
@@ -278,4 +277,16 @@ def send_zone_config_to_ip(ip: str, zvol: int, zmute: bool) -> bool:
             f',"audioCompatReason":"{compat_reason}"'
         )
     body += "}"
+    return send_ctrl_to_subscriber(ip, body)
+
+
+# ---- Master recording control ---------------------------------------------
+# The node's applyCtrlJson() handles rec_start/rec_stop before its
+# host_audio_sync target gate, so these are plain unicast ctrl datagrams.
+def send_rec_ctrl(ip: str, rec_id: str, action: str) -> bool:
+    if action not in ("rec_start", "rec_stop"):
+        return False
+    safe_id = "".join(ch for ch in rec_id if ch.isalnum() or ch in "._:-")[:64]
+    body = (f'{{"target":"{ip}","type":"{action}"'
+            f',"recId":"{safe_id}"}}')
     return send_ctrl_to_subscriber(ip, body)

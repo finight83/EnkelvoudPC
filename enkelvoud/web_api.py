@@ -20,6 +20,7 @@ from . import discovery
 from . import encoding_ctl
 from . import ota
 from . import peers as peers_mod
+from . import recorder
 from . import registry
 from . import sysinfo
 from . import zone_ctl
@@ -750,6 +751,40 @@ def create_app(web_dir: str, allow_restart: bool = False,
         data = _try_parse_json()
         ota.note_result(data if isinstance(data, dict) else {})
         return _json({"ok": True})
+
+    # ---- Master recording (server + selected nodes) --------------------
+    # One session id ties the ctrl start/stop pushes to the node reports.
+    # Nodes with the recorder firmware POST /api/player/rec_ack and serve
+    # /api/rec_report; older nodes are covered by the 1 Hz /api/logs poll.
+    @app.route("/api/rec/start", methods=["POST"])
+    def api_rec_start():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict):
+            return _json({"ok": False, "error": "bad json"}, 400)
+        status_code, body = recorder.start(
+            data.get("recId"), data.get("nodes"), bool(data.get("server", True)))
+        return _json(body, status_code)
+
+    @app.route("/api/rec/stop", methods=["POST"])
+    def api_rec_stop():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict):
+            return _json({"ok": False, "error": "bad json"}, 400)
+        status_code, body = recorder.stop(data.get("recId"))
+        return _json(body, status_code)
+
+    @app.route("/api/player/rec_ack", methods=["POST"])
+    def api_player_rec_ack():
+        data = _try_parse_json()
+        rec_id = data.get("recId") if isinstance(data, dict) else None
+        status_code = recorder.ack(rec_id, request.remote_addr or "")
+        return _json({"ok": status_code == 200}, status_code)
 
     @app.route("/api/restart", methods=["POST"])
     def api_restart():
