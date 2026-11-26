@@ -110,6 +110,12 @@ MODE_MOVIE = 1
 MODE_COUNT = 2
 MODE_NAMES = ["music", "movie"]
 
+# ---- 10-band equaliser -----------------------------------------------------
+# ISO octave centres. Gains are dB, clamped to +/-12 dB in eq.py; bands above
+# the Opus Nyquist (e.g. 16 kHz at a 24 kHz rate) are skipped automatically.
+EQ_BANDS = [31.5, 63.0, 125.0, 250.0, 500.0,
+            1000.0, 2000.0, 4000.0, 8000.0, 16000.0]
+
 # ---- Audio buffer bounds ---------------------------------------------------
 AUDIO_BUFFER_MIN_MS = 20
 AUDIO_BUFFER_MAX_MS = 400

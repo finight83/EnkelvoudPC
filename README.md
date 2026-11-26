@@ -241,12 +241,23 @@ streamed back in ~1 KB chunks. Nodes without that firmware never ack, so the
 server falls back to polling their `/api/logs` ring at 1 Hz — 50-line window,
 so keep the node log level at 1–2 for those.
 
+## 10-band equalizer
+
+**EQ** in the top bar opens ten vertical sliders — ISO octave centres
+31.5 Hz…16 kHz, ±12 dB in 0.5 dB steps — an **enable/disable** toggle and a
+**Flat** reset. The filter runs on the PCM frame *before* Opus encoding, so
+both the plain and the Quiet stream carry it (EQ → band-pass → limiter). Bands
+above the Opus Nyquist are skipped, so the 16 kHz slider does nothing at the
+24 kHz sample rate. State persists in `data/eq.json`; when every band is at
+0 dB the filter is bypassed and the frame passes through bit-exact.
+
 ## Persistent state
 
 - `data/zones.json` — zone definitions (volume, mute and per-room quiet).
 - `data/encoders.json` — per-mode encoder presets (`music`, `movie`; music is
   the default), plus the currently selected mode.
 - `data/ota_spool/` — uploaded player firmware images (`node_<version>.bin`).
+- `data/eq.json` — equalizer state (enabled flag + ten band gains in dB).
 
 Neither file is required at first run; missing files trigger defaults.
 

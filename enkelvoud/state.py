@@ -219,6 +219,7 @@ class Runtime:
         self.uart_lock    = threading.RLock()
         self.ota_lock     = threading.RLock()
         self.mode_settings_lock = threading.RLock()
+        self.eq_lock = threading.RLock()
 
         # ---- Subscriber table -------------------------------------------
         self.subscribers: List[Subscriber] = []
@@ -240,6 +241,9 @@ class Runtime:
         self.master_volume: int = C.DEFAULT_MASTER_VOLUME
         self.master_muted: bool = C.DEFAULT_MASTER_MUTED
         self.quiet_mode: bool = False
+        # [eq] Master 10-band equaliser, applied before Opus encoding.
+        self.eq_enabled: bool = False
+        self.eq_gains_db: List[float] = [0.0] * len(C.EQ_BANDS)
         self.latency_adjustment_ms: int = 0
         self.audio_buffer_ms: int = C.MODE_ENCODE_DEFAULTS[C.MODE_MUSIC]["buffer_ms"]
         self.log_level: int = 3              # NEW: /api/log/level

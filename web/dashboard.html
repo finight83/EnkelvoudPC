@@ -321,6 +321,7 @@
           <button type="button" class="nav-btn active" onclick="openTab(event, 'tab-zones')">Zones</button>
           <button type="button" class="nav-btn"        onclick="openTab(event, 'tab-advanced')">Advanced</button>
           <button type="button" class="nav-btn"        onclick="openTab(event, 'tab-update')">Update</button>
+          <button type="button" class="nav-btn" id="eqBtn" title="10-band equalizer">EQ</button>
           <button type="button" class="nav-btn nav-btn-primary" id="analyzeBtn" title="Record up to 10 min - click Finish Now to end early">&#9210; Analyze</button>
         </nav>
 
@@ -508,6 +509,28 @@
       <div class="ota-modal-footer">
         <button type="button" class="btn-glass" onclick="closeNameModal()">Cancel</button>
         <button type="button" class="btn-primary" onclick="saveName()">Save Name</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== Equalizer modal ===================== -->
+  <div id="eqModal" class="ota-modal" aria-hidden="true">
+    <div class="ota-modal-backdrop" onclick="closeEqModal()"></div>
+    <div class="ota-modal-panel" role="dialog" aria-modal="true" aria-label="Equalizer" style="max-width:720px;">
+      <div class="ota-modal-header">
+        <strong style="font-size:1rem;">10-band Equalizer</strong>
+        <button type="button" class="ota-close" onclick="closeEqModal()" aria-label="Close">&times;</button>
+      </div>
+      <div class="ota-modal-body">
+        <div class="log-controls" style="align-items:center;gap:10px;margin-bottom:4px;">
+          <button type="button" class="btn-glass" id="eqToggleBtn">Equalizer: Off</button>
+          <button type="button" class="btn-glass" id="eqFlatBtn" style="padding:4px 10px;font-size:0.75rem;">Flat</button>
+          <span class="muted" id="eqStatus" style="font-size:0.78rem;"></span>
+        </div>
+        <div id="eqBands" style="display:flex;gap:10px;justify-content:space-between;overflow-x:auto;padding:8px 0;"></div>
+      </div>
+      <div class="ota-modal-footer">
+        <button type="button" class="btn-primary" onclick="closeEqModal()">Done</button>
       </div>
     </div>
   </div>
@@ -2079,6 +2102,109 @@
       var list = $('update-node-list');
       if (list) list.addEventListener('change', function(e){
         if (e.target && e.target.classList && e.target.classList.contains('otaNodeChk')) otaRefreshSelection();
+      });
+    })();
+
+    // ====================================================================
+    //  10-band equalizer (server-side, applied before Opus)
+    // ====================================================================
+    var eqState = { enabled: false, gains: [], bands: [] };
+    var eqSendTimer = null;
+
+    function eqLabel(hz) {
+      return hz >= 1000 ? (hz / 1000) + 'k' : String(hz);
+    }
+
+    function eqPaintToggle() {
+      var b = $('eqToggleBtn');
+      if (!b) return;
+      b.textContent = 'Equalizer: ' + (eqState.enabled ? 'On' : 'Off');
+      b.style.borderColor = eqState.enabled ? 'var(--accent-primary)' : '';
+      b.style.color = eqState.enabled ? 'var(--accent-primary)' : '';
+    }
+
+    function eqFormatDb(v) {
+      return (v > 0 ? '+' : '') + v.toFixed(1) + ' dB';
+    }
+
+    function eqRender() {
+      var wrap = $('eqBands');
+      if (!wrap) return;
+      var html = '';
+      eqState.bands.forEach(function(hz, i){
+        var g = eqState.gains[i] || 0;
+        html +=
+          '<div style="display:flex;flex-direction:column;align-items:center;gap:6px;min-width:52px;">' +
+            '<span class="muted" id="eq-val-' + i + '" style="font-size:0.72rem;font-variant-numeric:tabular-nums;">' + eqFormatDb(g) + '</span>' +
+            '<input type="range" class="eq-slider" data-band="' + i + '" min="-12" max="12" step="0.5" value="' + g + '"' +
+              ' style="writing-mode:vertical-lr;direction:rtl;width:22px;height:150px;accent-color:#8e2de2;"' +
+              ' aria-label="' + hz + ' Hz">' +
+            '<span class="muted" style="font-size:0.72rem;">' + eqLabel(hz) + '</span>' +
+          '</div>';
+      });
+      wrap.innerHTML = html;
+      Array.prototype.forEach.call(wrap.querySelectorAll('.eq-slider'), function(el){
+        el.addEventListener('input', function(){
+          var i = parseInt(el.dataset.band, 10);
+          eqState.gains[i] = parseFloat(el.value);
+          var lab = $('eq-val-' + i);
+          if (lab) lab.textContent = eqFormatDb(eqState.gains[i]);
+          eqScheduleSend();
+        });
+      });
+      eqPaintToggle();
+    }
+
+    function eqScheduleSend() {
+      if (eqSendTimer) clearTimeout(eqSendTimer);
+      eqSendTimer = setTimeout(function(){
+        api('/api/audio/eq', 'POST', { gains: eqState.gains }).then(function(r){
+          var st = $('eqStatus');
+          if (st) st.textContent = (r && r.ok) ? 'applied' : 'failed';
+        });
+      }, 180);
+    }
+
+    async function eqLoad() {
+      var r = await api('/api/audio/eq', 'GET', undefined, { silent: true });
+      if (!r || !r.ok) return;
+      eqState.enabled = !!r.enabled;
+      eqState.gains = (r.gains || []).slice();
+      eqState.bands = (r.bands || []).slice();
+      var st = $('eqStatus');
+      if (st) st.textContent = '';
+      eqRender();
+    }
+
+    window.openEqModal = function() {
+      var m = $('eqModal');
+      if (!m) return;
+      eqLoad();
+      m.classList.add('open');
+      m.setAttribute('aria-hidden', 'false');
+    };
+
+    window.closeEqModal = function() {
+      var m = $('eqModal');
+      if (!m) return;
+      m.classList.remove('open');
+      m.setAttribute('aria-hidden', 'true');
+    };
+
+    (function(){
+      var btn = $('eqBtn');
+      if (btn) btn.addEventListener('click', window.openEqModal);
+      var toggle = $('eqToggleBtn');
+      if (toggle) toggle.addEventListener('click', async function(){
+        eqState.enabled = !eqState.enabled;
+        eqPaintToggle();
+        await api('/api/audio/eq', 'POST', { enabled: eqState.enabled });
+      });
+      var flat = $('eqFlatBtn');
+      if (flat) flat.addEventListener('click', function(){
+        eqState.gains = eqState.gains.map(function(){ return 0; });
+        eqRender();
+        eqScheduleSend();
       });
     })();
 

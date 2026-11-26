@@ -30,6 +30,7 @@ from . import ctrl as ctrl_mod
 from . import discovery as discovery_mod
 from . import encoder as encoder_mod
 from . import encoding_ctl
+from . import eq
 from . import ota
 from . import peers as peers_mod
 from . import registry
@@ -160,6 +161,7 @@ def main(argv=None) -> int:
     encoding_ctl.set_persistence_path(
         os.path.join(args.data_dir, "encoders.json"))
     ota.set_spool_dir(os.path.join(args.data_dir, "ota_spool"))
+    eq.set_persistence_path(os.path.join(args.data_dir, "eq.json"))
 
     # ---- Initial state --------------------------------------------------
     runtime.log_level = args.log_level
@@ -169,6 +171,7 @@ def main(argv=None) -> int:
 
     zone_ctl.load_zones_from_disk()
     encoding_ctl.load_encoders_from_disk()
+    eq.load_from_disk()
     encoding_ctl.apply_mode_settings_to_live(runtime.playback_mode_idx)
 
     log_info("Enkelvoud PC server starting")

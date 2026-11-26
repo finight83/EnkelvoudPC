@@ -18,6 +18,7 @@ from . import constants as C
 from . import ctrl
 from . import discovery
 from . import encoding_ctl
+from . import eq
 from . import ota
 from . import peers as peers_mod
 from . import recorder
@@ -611,6 +612,29 @@ def create_app(web_dir: str, allow_restart: bool = False,
         body = encoding_ctl.apply_defaults()
         zone_ctl.broadcast_node_config()
         return _json(body)
+
+    # ---- /api/audio/eq (10-band equaliser) ----------------------------
+    @app.route("/api/audio/eq", methods=["GET"])
+    def api_eq_get():
+        return _json(eq.state())
+
+    @app.route("/api/audio/eq", methods=["POST"])
+    def api_eq_post():
+        empty = _reject_empty_body()
+        if empty is not None:
+            return empty
+        data = _try_parse_json()
+        if not isinstance(data, dict):
+            return _json({"ok": False, "error": "bad json"}, 400)
+        enabled = data.get("enabled")
+        gains = data.get("gains")
+        if enabled is not None and not isinstance(enabled, bool):
+            return _json({"ok": False, "error": "enabled must be true/false"}, 400)
+        if gains is not None and not isinstance(gains, list):
+            return _json({"ok": False, "error": "gains must be a list"}, 400)
+        if enabled is None and gains is None:
+            return _json({"ok": False, "error": "nothing to apply"}, 400)
+        return _json(eq.apply(enabled=enabled, gains=gains))
 
     # ---- Zones ---------------------------------------------------------
     @app.route("/api/zones/create", methods=["POST"])

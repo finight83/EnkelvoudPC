@@ -24,6 +24,7 @@ from typing import Optional
 import numpy as np
 
 from . import constants as C
+from . import eq as eq_mod
 from .queues import (
     EncodeFrame, OpusPacket, encode_queue, opus_queue, quiet_opus_queue,
 )
@@ -128,6 +129,12 @@ class OpusEncoderThread:
                 else:
                     pcm_bytes = frame.pcm
                     n_samples = 960
+
+                # [eq] Master 10-band EQ first, so both the plain stream and
+                # the Quiet stream (which filters this same frame) inherit it.
+                if runtime.eq_enabled:
+                    pcm_bytes = eq_mod.equalizer.process(
+                        pcm_bytes, runtime.opus_sample_rate)
 
                 opus_bytes = self._encoder.encode(pcm_bytes, n_samples)
                 runtime.current_bitrate = runtime.new_bitrate
