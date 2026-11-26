@@ -1,0 +1,3 @@
+# Python sources are LF; .bat files must stay CRLF (goto labels break otherwise).
+*.py  text eol=lf
+*.bat text eol=crlf
