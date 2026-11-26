@@ -377,6 +377,12 @@
     .zone-box { padding: 18px; border-radius: 22px; }
     .zone-container { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
     .zone-actions { justify-content: flex-start; gap: 8px; }
+    .zone-action-bar { display: flex; gap: 10px; align-items: center; margin: 2px 0 14px; }
+    /* The servers card used to be inset 30px further than the room cards. */
+    .zones-controls { padding-left: 0; padding-right: 0; }
+    .zone-action-bar .btn-glass { display: inline-flex; align-items: center; gap: 8px; }
+    .zone-action-bar .btn-glass svg { width: 17px; height: 17px; stroke: currentColor;
+      fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
     /* the room name is a heading, not a form field */
     .zone-header input[type="text"] { background: transparent; border: none; padding: 2px 0; font-weight: 600; font-size: 1rem; }
     .data-label .stat-pill { text-transform: none; letter-spacing: 0; }
@@ -533,10 +539,6 @@
             <svg viewBox="0 0 24 24"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14"/></svg>
             Update
           </button>
-          <button type="button" class="nav-btn" id="eqBtn" title="10-band equalizer">
-            <svg viewBox="0 0 24 24"><path d="M6 20V10M12 20V4M18 20V13"/><path d="M4 10h4M10 4h4M16 13h4"/></svg>
-            EQ
-          </button>
           <button type="button" class="nav-btn nav-btn-primary" id="analyzeBtn" title="Record up to 10 min - click Finish Now to end early">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
             Analyze
@@ -549,32 +551,24 @@
     <!-- ======================= TAB: ZONES ======================= -->
     <div id="tab-zones" class="tab-content active">
       <div class="zones-controls" style="padding-bottom: 0;">
-        
-        <!-- Moved + Add Room next to title -->
-        <div class="zone-toolbar" style="flex-wrap:wrap;gap:10px; margin-bottom: 10px; display: flex; justify-content: flex-start; align-items: center; width: 100%;">
-          <div style="display:flex;gap:10px;align-items:center;">
-            <h2 class="section-title" style="margin:0;">Zone Architecture</h2>
-            <button type="button" class="btn-glass" onclick="createNewZone()" style="padding: 6px 14px; font-size: 0.82rem;">
-              + Add Room
-            </button>
-          </div>
-        </div>
-
         <!-- Multi-server election: drag to rank, top = most preferred. -->
         <div class="control-card" style="margin-bottom: 16px;">
-          <div class="data-label" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            Servers
-            <span class="stat-pill" id="srv-role">role …</span>
-            <span class="stat-pill" id="srv-leader">leader …</span>
-          </div>
-          <p class="muted" style="font-size:0.78rem;margin:6px 0 0;">Drag to set which server the nodes use — top row = highest priority. Only the leader answers node discovery.</p>
-          <div id="serverList" style="margin-top:10px;display:flex;flex-direction:column;gap:6px;"></div>
+          <div id="serverList" style="display:flex;flex-direction:column;gap:6px;"></div>
           <div class="muted" id="srv-state" style="font-size:0.75rem;margin-top:6px;"></div>
         </div>
       </div>
-      <div class="control-card" id="discoveredCard" style="display:none; margin: 0 30px 16px;">
+      <div class="control-card" id="discoveredCard" style="display:none; margin: 0 0 16px;">
         <div class="data-label" style="margin-bottom:8px;">Discovered nodes &mdash; drag into a room to assign (muted until then)</div>
         <div id="discoveredContainer" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+      </div>
+      <div class="zone-action-bar">
+        <button type="button" class="btn-glass" onclick="createNewZone()">
+          + Add Room
+        </button>
+        <button type="button" class="btn-glass" id="eqBtn" title="10-band equalizer">
+          <svg viewBox="0 0 24 24"><path d="M6 20V10M12 20V4M18 20V13"/><path d="M4 10h4M10 4h4M16 13h4"/></svg>
+          EQ
+        </button>
       </div>
       <div class="zone-container" id="zonesContainer">
         <div class="control-card"><p class="muted">Loading zone map...</p></div>
@@ -1272,18 +1266,7 @@
     }
     function renderServers(s) {
       var listEl = $('serverList');
-      var roleEl = $('srv-role');
-      var leadEl = $('srv-leader');
       if (!listEl) return;
-      var isLeader = (s.role === 'leader');
-      if (roleEl) {
-        roleEl.textContent = isLeader ? 'LEADER' : 'standby';
-        roleEl.className = 'stat-pill' + (isLeader ? ' ok' : '');
-      }
-      var leader = (serversData || []).find(function(x){ return x.id === s.leaderId; });
-      if (leadEl) {
-        leadEl.textContent = 'leader: ' + (leader ? (leader.self ? 'this server' : (leader.name || leader.id)) : '?');
-      }
       var html = '';
       (serversData || []).forEach(function(sv, idx){
         var down = (sv.alive === false) && !sv.self;
