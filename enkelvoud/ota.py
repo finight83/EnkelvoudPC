@@ -59,6 +59,33 @@ MAX_FW_BYTES = 8 * 1024 * 1024
 # `node_3.8.1.2.bin` - kind, then the version the dashboard verifies against.
 _NAME_RE = re.compile(r"^(server|node|source)_([0-9A-Za-z._-]{1,32})\.bin$")
 
+# ESP32 application images start with the 0xE9 image magic and carry an
+# esp_app_desc_t (magic 0xABCD5432, little-endian) at offset 32. A bootloader
+# also starts with 0xE9 but is ~20 KB and has no app descriptor, and a
+# partition table does not start with 0xE9 at all. Pushing either made every
+# node answer "commit_failed" -- the node wrote it and then refused to commit.
+_APP_DESC_MAGIC = b"\x32\x54\xCD\xAB"
+_MIN_APP_BYTES = 256 * 1024
+
+
+def validate_app_image(path: str) -> Optional[str]:
+    """Return an error string if `path` is not a plausible ESP32 app image."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            head = f.read(64)
+    except OSError as e:
+        return f"cannot read image: {e}"
+    if size < _MIN_APP_BYTES:
+        return (f"not an application image ({size} bytes): this looks like a "
+                f"bootloader/partitions file; select the sketch's .ino.bin")
+    if len(head) < 36 or head[0] != 0xE9:
+        return "not an ESP32 image (bad magic)"
+    if head[32:36] != _APP_DESC_MAGIC:
+        return ("not an ESP32 application image (no app descriptor): this is "
+                "a bootloader or a partition table, not the sketch's .ino.bin")
+    return None
+
 _spool_dir: Optional[str] = None
 _lock = threading.Lock()
 
@@ -344,6 +371,9 @@ def start_job(node_ips: List[str], file_name: str) -> Tuple[int, Dict]:
     path = os.path.join(_spool_dir, file_name)
     if not os.path.isfile(path):
         return 400, {"ok": False, "error": "selected node bin not in spool"}
+    bad = validate_app_image(path)
+    if bad:
+        return 400, {"ok": False, "error": bad}
 
     now = now_ms()
     try:
@@ -414,6 +444,10 @@ def save_upload(storage) -> Tuple[int, Dict]:
         if size > MAX_FW_BYTES:
             os.remove(tmp)
             return 413, {"ok": False, "error": "firmware too large"}
+        bad = validate_app_image(tmp)
+        if bad:
+            os.remove(tmp)
+            return 400, {"ok": False, "error": bad}
         os.replace(tmp, path)
     except OSError as e:
         try:
