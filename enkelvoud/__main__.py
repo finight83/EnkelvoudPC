@@ -16,6 +16,7 @@ Options:
 """
 
 import argparse
+import errno
 import os
 import signal
 import socket
@@ -193,7 +194,21 @@ def main(argv=None) -> int:
     try:
         discovery_mod.discovery.start(args.port)
     except OSError as e:
-        log_error("Discovery failed to start: %s", e)
+        # [port-in-use] WinError 10048 / EADDRINUSE on UDP 4201 is almost
+        # always a second Enkelvoud server left running on this PC - and the
+        # bare errno gives the operator nothing to act on. Two servers on one
+        # PC would both answer node discovery, so this one must exit; say why.
+        if getattr(e, "errno", None) in (errno.EADDRINUSE, 10048):
+            log_error("UDP port %d is already in use on this PC, so this "
+                      "server cannot start.", C.DISCOVERY_PORT)
+            log_error("  This is almost always a second Enkelvoud server that "
+                      "is still running (its console window, or a python.exe "
+                      "left behind after a crash or a closed terminal).")
+            log_error("  Close the other server, then start this one again.")
+            log_error("  Find the owner with:  netstat -ano | findstr :%d",
+                      C.DISCOVERY_PORT)
+        else:
+            log_error("Discovery failed to start: %s", e)
         return 1
 
     if args.port != 80:

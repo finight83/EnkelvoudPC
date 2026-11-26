@@ -276,3 +276,26 @@ matches the ESP32: `[INFO ] <ms> ms | <text>`.
   the wire format is.
 - The dashboard is served from `web/dashboard.html` (no embedded copy or
   `EVDCTRL.h` header).
+
+## Troubleshooting
+
+### `Discovery failed to start: [WinError 10048]` / `UDP port 4201 is already in use`
+
+A second Enkelvoud server is running on this PC — usually its console window
+is still open, or a `python.exe` survived a crash or a closed terminal. Two
+servers would both answer node discovery, so the new one exits by design.
+
+Find it and close it:
+
+```
+netstat -ano | findstr :4201
+```
+
+that prints the owning PID in the last column; end it from Task Manager, or:
+
+```
+taskkill /PID <pid> /F
+```
+
+Then start `run.bat` again. Nothing needs reinstalling — the port is simply
+owned by the other process.
