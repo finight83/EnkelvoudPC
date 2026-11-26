@@ -5,7 +5,8 @@ Pure data / orchestration on top of state.Runtime. Sends no HTTP responses
 itself; that is web_api.py's job. This module:
   - handles the full /api/player/register backend flow
   - resolves zone state for an IP
-  - auto-assigns a new node to Main Room if it's not already in any zone
+  - leaves a new node UNASSIGNED (the Discovered pool) until the operator
+    drags it into a room; unassigned nodes are muted (no audio)
 """
 
 from typing import Tuple
