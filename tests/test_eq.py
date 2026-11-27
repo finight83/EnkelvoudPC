@@ -122,5 +122,68 @@ class EqualizerStateTest(unittest.TestCase):
         self.assertTrue(all(g == eq_mod.MAX_GAIN_DB for g in st["gains"]))
 
 
+
+class PresetCurveTests(unittest.TestCase):
+    """[eq-presets] Named curves, and a hand-moved curve becoming Custom."""
+
+    def setUp(self):
+        with runtime.eq_lock:
+            runtime.eq_enabled = False
+            runtime.eq_gains_db = [0.0] * len(C.EQ_BANDS)
+            runtime.eq_custom_db = [0.0] * len(C.EQ_BANDS)
+            runtime.eq_preset = "custom"
+
+    def test_every_preset_has_one_gain_per_band_and_is_in_range(self):
+        for name, curve in eq_mod.EQ_PRESETS.items():
+            self.assertEqual(len(curve), len(C.EQ_BANDS), name)
+            for g in curve:
+                self.assertLessEqual(abs(g), eq_mod.MAX_GAIN_DB, name)
+
+    def test_flat_preset_is_all_zero(self):
+        self.assertEqual(eq_mod.preset_curve("flat"), [0.0] * len(C.EQ_BANDS))
+
+    def test_selecting_a_preset_loads_its_curve_and_names_it(self):
+        st = eq_mod.apply(preset="rock")
+        self.assertEqual(st["preset"], "rock")
+        self.assertEqual(st["gains"], [float(g) for g in eq_mod.EQ_PRESETS["rock"]])
+
+    def test_preset_name_is_case_insensitive(self):
+        self.assertEqual(eq_mod.apply(preset="JAZZ")["preset"], "jazz")
+
+    def test_unknown_preset_leaves_the_curve_alone(self):
+        before = list(runtime.eq_gains_db)
+        st = eq_mod.apply(preset="no-such-curve")
+        self.assertEqual(st["gains"], before)
+
+    def test_moving_a_band_off_a_preset_becomes_custom_and_is_saved(self):
+        eq_mod.apply(preset="pop")
+        moved = list(eq_mod.EQ_PRESETS["pop"])
+        moved[BAND_1K] += 3.0
+        st = eq_mod.apply(gains=moved)
+        self.assertEqual(st["preset"], "custom")
+        self.assertEqual(st["gains"][BAND_1K], moved[BAND_1K])
+        # ... and picking Custom again restores exactly what was dialled in.
+        eq_mod.apply(preset="flat")
+        back = eq_mod.apply(preset="custom")
+        self.assertEqual(back["gains"][BAND_1K], moved[BAND_1K])
+
+    def test_curve_matching_a_preset_exactly_is_that_preset(self):
+        st = eq_mod.apply(gains=list(eq_mod.EQ_PRESETS["vocal"]))
+        self.assertEqual(st["preset"], "vocal")
+
+    def test_custom_curve_survives_a_reload(self):
+        eq_mod.apply(gains=[1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        eq_mod.apply(preset="rock")
+        eq_mod.load_from_disk()
+        self.assertEqual(runtime.eq_preset, "rock")
+        self.assertEqual(runtime.eq_custom_db[:3], [1.0, 2.0, 3.0])
+
+    def test_state_reports_preset_and_custom(self):
+        eq_mod.apply(gains=[2.0] * len(C.EQ_BANDS))
+        st = eq_mod.state()
+        self.assertEqual(st["preset"], "custom")
+        self.assertEqual(st["custom"], [2.0] * len(C.EQ_BANDS))
+        self.assertIn("rock", st["presets"])
+
 if __name__ == "__main__":
     unittest.main()

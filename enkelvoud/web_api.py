@@ -110,6 +110,12 @@ def _build_state_response() -> dict:
     # standby's dashboard shows the fleet instead of every node as offline.
     shared_nodes = peers_mod.peers.peer_node_map()
 
+    # [node-latency-in-state] Per-node reported latency (from /api/node_stats)
+    # travels with the zone map so a dashboard can paint it on the node chip
+    # without a second request to /api/stats. It is the same value /api/stats
+    # reports for that IP; None when the node has not reported yet.
+    perf_by_ip = {p.ip: p for p in runtime.snapshot_perf()}
+
     zone_json = []
     for z in zones:
         node_entries = []
@@ -130,6 +136,12 @@ def _build_state_response() -> dict:
                     "version": (shared.get("ver") or "") if shared else "",
                     "known": bool(shared),
                 })
+        # [node-latency-in-state] attach the last reported latency to each
+        # node entry (None = no /api/node_stats from that IP yet).
+        for entry in node_entries:
+            perf = perf_by_ip.get(entry["ip"])
+            entry["latencyMs"] = perf.latency_ms if perf is not None else None
+
         zone_json.append({
             "id": z.id, "name": z.name, "volume": z.volume,
             "muted": z.muted, "quiet": z.quiet, "nodes": node_entries,
@@ -635,13 +647,20 @@ def create_app(web_dir: str, allow_restart: bool = False,
             return _json({"ok": False, "error": "bad json"}, 400)
         enabled = data.get("enabled")
         gains = data.get("gains")
+        preset = data.get("preset")
+        custom = data.get("custom")
         if enabled is not None and not isinstance(enabled, bool):
             return _json({"ok": False, "error": "enabled must be true/false"}, 400)
         if gains is not None and not isinstance(gains, list):
             return _json({"ok": False, "error": "gains must be a list"}, 400)
-        if enabled is None and gains is None:
+        if preset is not None and not isinstance(preset, str):
+            return _json({"ok": False, "error": "preset must be a string"}, 400)
+        if custom is not None and not isinstance(custom, list):
+            return _json({"ok": False, "error": "custom must be a list"}, 400)
+        if enabled is None and gains is None and preset is None and custom is None:
             return _json({"ok": False, "error": "nothing to apply"}, 400)
-        return _json(eq.apply(enabled=enabled, gains=gains))
+        return _json(eq.apply(enabled=enabled, gains=gains,
+                              preset=preset, custom=custom))
 
     # ---- Zones ---------------------------------------------------------
     @app.route("/api/zones/create", methods=["POST"])

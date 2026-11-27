@@ -17,7 +17,9 @@ REM  vendor\ next to this file, then run install.bat.
 REM ==========================================================================
 
 setlocal
-cd /d "%~dp0"
+REM pushd, not cd /d: on a UNC path (\\server\share) cmd cannot cd and would
+REM stay in C:\Windows, so tools\setup_runtime.ps1 would not be found.
+pushd "%~dp0"
 
 echo ================================================================
 echo  Enkelvoud PC server - install
@@ -42,4 +44,5 @@ if not "%RC%"=="0" (
 echo.
 echo Press any key to close this window...
 pause >nul
+popd
 exit /b %RC%

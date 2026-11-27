@@ -247,6 +247,12 @@ class Runtime:
         # [eq] Master 10-band equaliser, applied before Opus encoding.
         self.eq_enabled: bool = False
         self.eq_gains_db: List[float] = [0.0] * len(C.EQ_BANDS)
+        # [eq-presets] Which named curve is selected ("custom" or one of the
+        # presets in eq.py), and the hand-made curve that "Custom" restores.
+        # The ESP32 server carries the same two fields in EVDEq.h so both
+        # dashboards can talk to either server.
+        self.eq_preset: str = "custom"
+        self.eq_custom_db: List[float] = [0.0] * len(C.EQ_BANDS)
         self.latency_adjustment_ms: int = 0
         self.audio_buffer_ms: int = C.MODE_ENCODE_DEFAULTS[C.MODE_MUSIC]["buffer_ms"]
         self.log_level: int = 3              # NEW: /api/log/level

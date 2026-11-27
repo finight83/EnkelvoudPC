@@ -744,8 +744,26 @@
         <button type="button" class="ota-close" onclick="closeEqModal()" aria-label="Close">&times;</button>
       </div>
       <div class="ota-modal-body">
-        <div class="log-controls" style="align-items:center;gap:10px;margin-bottom:4px;">
+        <div class="log-controls" style="align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap;">
           <button type="button" class="btn-glass" id="eqToggleBtn">Equalizer: Off</button>
+          <!-- [eq-presets] Same eight names as the ESP32 dashboard. Picking
+               one loads its curve; moving any band afterwards turns the
+               selection into Custom and saves that as the custom curve. -->
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;">
+            Preset
+            <select id="eqPresetSelect" aria-label="Equalizer preset curve"
+                    style="background:rgba(0,0,0,0.35);border:1px solid var(--border-color,#333);
+                           border-radius:8px;color:inherit;padding:6px 8px;font:inherit;font-size:0.78rem;">
+              <option value="custom">Custom</option>
+              <option value="flat">Flat</option>
+              <option value="pop">Pop</option>
+              <option value="rock">Rock</option>
+              <option value="jazz">Jazz</option>
+              <option value="classical">Classical</option>
+              <option value="edm">EDM</option>
+              <option value="vocal">Vocal</option>
+            </select>
+          </label>
           <button type="button" class="btn-glass" id="eqFlatBtn" style="padding:4px 10px;font-size:0.75rem;">Flat</button>
           <span class="muted" id="eqStatus" style="font-size:0.78rem;"></span>
         </div>
@@ -2323,8 +2341,66 @@
     // ====================================================================
     //  10-band equalizer (server-side, applied before Opus)
     // ====================================================================
-    var eqState = { enabled: false, gains: [], bands: [] };
+    var eqState = { enabled: false, gains: [], bands: [], preset: 'custom',
+                    custom: [0,0,0,0,0,0,0,0,0,0], presets: {} };
     var eqSendTimer = null;
+
+    // [eq-presets] Fallback table, used only if the server does not send
+    // its own (an older build). Kept identical to enkelvoud/eq.py.
+    var EQ_PRESETS_FALLBACK = {
+      flat:      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      pop:       [-1, 2, 4, 5, 3, 0, -1, -1, 1, 2],
+      rock:      [5, 4, 3, 1, -1, -2, -1, 1, 3, 4],
+      jazz:      [3, 2, 1, 2, -1, -1, 0, 1, 2, 3],
+      classical: [4, 3, 2, 1, -1, -1, 0, 2, 3, 4],
+      edm:       [6, 5, 2, 0, -2, 2, 1, 2, 5, 4],
+      vocal:     [-3, -2, -1, 1, 4, 5, 4, 2, -1, -2]
+    };
+    var EQ_PRESET_LABELS = { flat: 'Flat', pop: 'Pop', rock: 'Rock', jazz: 'Jazz',
+                             classical: 'Classical', edm: 'EDM', vocal: 'Vocal',
+                             custom: 'Custom' };
+
+    function eqPresetTable() {
+      return (eqState.presets && Object.keys(eqState.presets).length)
+        ? eqState.presets : EQ_PRESETS_FALLBACK;
+    }
+    function eqCurve(name) {
+      if (name === 'custom') return (eqState.custom || []).slice();
+      var t = eqPresetTable();
+      return t[name] ? t[name].slice() : null;
+    }
+    function eqPresetNameFromCurve(gains) {
+      var t = eqPresetTable();
+      var keys = Object.keys(t);
+      for (var i = 0; i < keys.length; i++) {
+        var p = t[keys[i]], same = true;
+        for (var b = 0; b < p.length; b++) {
+          if (Math.abs((gains[b] || 0) - p[b]) > 0.01) { same = false; break; }
+        }
+        if (same) return keys[i];
+      }
+      return 'custom';
+    }
+    function eqPaintPreset() {
+      var sel = $('eqPresetSelect');
+      if (sel && sel.value !== eqState.preset) sel.value = eqState.preset;
+    }
+    async function eqApplyPreset(name) {
+      var curve = eqCurve(name);
+      if (!curve) return;
+      eqState.preset = name;
+      eqState.gains = curve.slice();
+      if (name === 'custom') eqState.custom = curve.slice();
+      eqRender();
+      eqPaintPreset();
+      var body = { gains: eqState.gains, preset: eqState.preset };
+      if (eqState.preset === 'custom') body.custom = eqState.custom;
+      var st = $('eqStatus');
+      if (st) st.textContent = 'applying\u2026';
+      var r = await api('/api/audio/eq', 'POST', body);
+      if (st) st.textContent = (r && r.ok)
+        ? (EQ_PRESET_LABELS[name] || name) + ' applied' : 'failed';
+    }
 
     function eqLabel(hz) {
       return hz >= 1000 ? (hz / 1000) + 'k' : String(hz);
@@ -2364,6 +2440,16 @@
           eqState.gains[i] = parseFloat(el.value);
           var lab = $('eq-val-' + i);
           if (lab) lab.textContent = eqFormatDb(eqState.gains[i]);
+          // [preset-becomes-custom] Moving a band while a named curve is
+          // selected turns the selection into Custom and saves what the
+          // operator just dialled in as the custom curve.
+          if (eqState.preset !== 'custom') {
+            eqState.preset = 'custom';
+            eqState.custom = eqState.gains.slice();
+            eqPaintPreset();
+          } else {
+            eqState.custom = eqState.gains.slice();
+          }
           eqScheduleSend();
         });
       });
@@ -2373,7 +2459,9 @@
     function eqScheduleSend() {
       if (eqSendTimer) clearTimeout(eqSendTimer);
       eqSendTimer = setTimeout(function(){
-        api('/api/audio/eq', 'POST', { gains: eqState.gains }).then(function(r){
+        var body = { gains: eqState.gains, preset: eqState.preset };
+        if (eqState.preset === 'custom') body.custom = eqState.custom;
+        api('/api/audio/eq', 'POST', body).then(function(r){
           var st = $('eqStatus');
           if (st) st.textContent = (r && r.ok) ? 'applied' : 'failed';
         });
@@ -2386,9 +2474,17 @@
       eqState.enabled = !!r.enabled;
       eqState.gains = (r.gains || []).slice();
       eqState.bands = (r.bands || []).slice();
+      eqState.presets = (r.presets && typeof r.presets === 'object') ? r.presets : {};
+      var table = eqPresetTable();
+      eqState.preset = (r.preset && (r.preset === 'custom' || table[r.preset]))
+        ? r.preset : eqPresetNameFromCurve(eqState.gains);
+      eqState.custom = (r.custom && r.custom.length === eqState.gains.length)
+        ? r.custom.slice()
+        : (eqState.preset === 'custom' ? eqState.gains.slice() : eqState.custom);
       var st = $('eqStatus');
       if (st) st.textContent = '';
       eqRender();
+      eqPaintPreset();
     }
 
     window.openEqModal = function() {
@@ -2417,9 +2513,11 @@
       });
       var flat = $('eqFlatBtn');
       if (flat) flat.addEventListener('click', function(){
-        eqState.gains = eqState.gains.map(function(){ return 0; });
-        eqRender();
-        eqScheduleSend();
+        eqApplyPreset('flat');
+      });
+      var presetSel = $('eqPresetSelect');
+      if (presetSel) presetSel.addEventListener('change', function(){
+        eqApplyPreset(presetSel.value);
       });
       // [eq-deep-link] /#eq opens the equalizer directly (bookmarkable).
       if (location.hash === '#eq') openEqModal();

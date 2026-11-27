@@ -20,7 +20,11 @@ REM  itself and waits for a key press before closing, whatever happens.
 REM ==========================================================================
 
 setlocal
-cd /d "%~dp0"
+REM pushd, not cd /d: run from a \\server\share and cmd cannot make a UNC path
+REM the current directory, so cd /d fails silently and the shell stays in
+REM C:\Windows -- every relative path below (runtime\, tools\, web\) then
+REM misses. pushd maps a temporary drive for the share and enters it.
+pushd "%~dp0"
 
 echo ================================================================
 echo  Enkelvoud PC server
@@ -138,6 +142,7 @@ echo ================================================================
 echo.
 echo Press any key to close this window...
 pause >nul
+popd
 exit /b 0
 
 REM ==========================================================================
